@@ -1,5 +1,6 @@
 #include "boot_screen.h"
 #include "opendisplay_ble.h"
+#include "opendisplay_battery.h"
 #include "opendisplay_config_parser.h"
 #include "opendisplay_display_color.h"
 #include "opendisplay_structs.h"
@@ -76,7 +77,7 @@ static int boot_get_plane(uint8_t color_scheme)
 
 static float boot_read_battery_voltage(void)
 {
-  return -999.0f;
+  return opendisplay_battery_read_voltage_volts();
 }
 
 static float boot_read_chip_temperature(void)
