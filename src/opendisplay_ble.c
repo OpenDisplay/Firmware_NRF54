@@ -373,7 +373,7 @@ static void apply_tx_power(uint8_t handle_type, uint16_t handle)
 	struct net_buf *rsp = NULL;
 	int err;
 
-	buf = bt_hci_cmd_create(BT_HCI_OP_VS_WRITE_TX_POWER_LEVEL, sizeof(*cp));
+	buf = bt_hci_cmd_alloc(K_FOREVER);
 	if (buf == NULL) {
 		printf("[OD] tx_power: no HCI cmd buffer\r\n");
 		return;
