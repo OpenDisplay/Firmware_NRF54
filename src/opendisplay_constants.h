@@ -11,6 +11,7 @@
 #define CONFIG_PKT_BINARY_INPUT   0x25
 #define CONFIG_PKT_WIFI           0x26
 #define CONFIG_PKT_SECURITY       0x27
+#define CONFIG_PKT_TOUCH          0x28
 #define CONFIG_PKT_NFC            0x2A
 #define CONFIG_PKT_FLASH          0x2B
 #define CONFIG_PKT_DATA_EXTENDED  0x2C

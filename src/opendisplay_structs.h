@@ -123,6 +123,31 @@ struct BinaryInputs {
   uint8_t reserved[14];
 } __attribute__((packed));
 
+/* 0x28: touch_controller (repeatable, max 4 instances). 32-byte fixed packet;
+ * on-wire layout matches OpenDisplay-Firmware src/structs.h TouchController and
+ * the py-opendisplay serializer (config_serializer.serialize_touch_controller).
+ * touch_ic_type: 0 = disabled / none, 1 = GT911. */
+#define TOUCH_IC_NONE   0u
+#define TOUCH_IC_GT911  1u
+#define TOUCH_FLAG_INVERT_X  (1u << 0)
+#define TOUCH_FLAG_INVERT_Y  (1u << 1)
+#define TOUCH_FLAG_SWAP_XY   (1u << 2)
+
+struct TouchController {
+  uint8_t instance_number;
+  uint16_t touch_ic_type;
+  uint8_t bus_id;             /* data_bus index for the I2C SCL/SDA pins */
+  uint8_t i2c_addr_7bit;      /* GT911: 0x5D or 0x14; 0 or 0xFF = auto */
+  uint8_t int_pin;            /* GT911 INT, 0xFF = poll only */
+  uint8_t rst_pin;            /* GT911 RST, 0xFF = skip hardware reset */
+  uint8_t display_instance;   /* clip/scale to displays[instance] pixel size */
+  uint8_t flags;              /* TOUCH_FLAG_* */
+  uint8_t poll_interval_ms;   /* 0 = default */
+  uint8_t touch_data_start_byte; /* first of 5 MSD dynamic bytes (0-6) */
+  uint8_t enable_pin;         /* optional touch panel power enable; 0/0xFF = unused */
+  uint8_t reserved[20];
+} __attribute__((packed));
+
 struct NfcConfig {
   uint8_t instance_number;
   uint8_t nfc_ic_type;
@@ -187,6 +212,8 @@ struct GlobalConfig {
   uint8_t data_bus_count;
   struct BinaryInputs binary_inputs[4];
   uint8_t binary_input_count;
+  struct TouchController touch_controllers[4];
+  uint8_t touch_controller_count;
   struct NfcConfig nfc_configs[2];
   uint8_t nfc_config_count;
   struct FlashConfig flash_configs[2];

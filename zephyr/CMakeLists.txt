@@ -34,6 +34,7 @@ target_sources(app PRIVATE
   ${SRC_DIR}/boot_screen.cpp
   ${SRC_DIR}/opendisplay_epd_map.c
   ${SRC_DIR}/opendisplay_led.c
+  ${SRC_DIR}/opendisplay_touch.c
   ${SRC_DIR}/opendisplay_pipe.c
   ${SRC_DIR}/qr/qrcode.c
   ${BB_EPAPER_DIR}/bb_epaper.cpp

@@ -2,6 +2,7 @@
 #include "opendisplay_ble.h"
 #include "opendisplay_config_parser.h"
 #include "opendisplay_structs.h"
+#include "opendisplay_touch.h"
 #include "nrf54_gpio.h"
 
 #include <stdio.h>
@@ -55,6 +56,10 @@ void opendisplay_button_init(void)
       }
       uint8_t pin = *instance_pins[pin_idx];
       if (pin == 0xFFu || s_button_count >= MAX_BUTTONS) {
+        continue;
+      }
+      if (opendisplay_touch_gpio_is_touch_int(pin)) {
+        printf("[OD] button: skip pin 0x%02X (reserved for GT911 INT)\r\n", (unsigned)pin);
         continue;
       }
 

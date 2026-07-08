@@ -6,6 +6,7 @@
 #include "opendisplay_epd_map.h"
 #include "opendisplay_protocol.h"
 #include "opendisplay_structs.h"
+#include "opendisplay_touch.h"
 #include "board_nrf54.h"
 #include "boot_screen.h"
 #include "nrf54_gpio.h"
@@ -930,6 +931,9 @@ extern "C" int opendisplay_display_direct_write_end_refresh(const uint8_t *paylo
       *refresh_ok = ok;
     }
     partial_cleanup();
+    /* An EPD refresh can perturb a GT911 sharing the panel power rail; re-probe
+     * it (light probe first, full reset fallback) as the Arduino reference does. */
+    opendisplay_touch_resume_after_refresh();
     return 0;
   }
 
@@ -972,5 +976,7 @@ extern "C" int opendisplay_display_direct_write_end_refresh(const uint8_t *paylo
   if (refresh_ok != nullptr) {
     *refresh_ok = ok;
   }
+  /* See note above: re-probe touch after the full-refresh path too. */
+  opendisplay_touch_resume_after_refresh();
   return 0;
 }
