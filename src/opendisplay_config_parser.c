@@ -422,6 +422,36 @@ bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConf
                  * read-back. The old code skipped a hardcoded 162 bytes; the packet
                  * is 160 bytes on the wire, so that off-by-2 desynced every packet
                  * after wifi. */
+            case CONFIG_PKT_PASSIVE_BUZZER: // passive_buzzer (0x29) - parse but don't log
+                if (offset > configLen) {
+                    printf("Offset overflow before passive_buzzer\r\n");
+                    globalConfig->loaded = false;
+                    return false;
+                }
+                if (globalConfig->passive_buzzer_count < 4 && offset + sizeof(struct PassiveBuzzerConfig) <= configLen - 2) {
+                    memcpy(&globalConfig->passive_buzzers[globalConfig->passive_buzzer_count], &configData[offset], sizeof(struct PassiveBuzzerConfig));
+                    offset += sizeof(struct PassiveBuzzerConfig);
+                    if (offset > configLen) {
+                        printf("Offset overflow after passive_buzzer\r\n");
+                        globalConfig->loaded = false;
+                        return false;
+                    }
+                    globalConfig->passive_buzzer_count++;
+                } else if (globalConfig->passive_buzzer_count >= 4) {
+                    offset += sizeof(struct PassiveBuzzerConfig);
+                    if (offset > configLen) {
+                        printf("Offset overflow after passive_buzzer (skipped)\r\n");
+                        globalConfig->loaded = false;
+                        return false;
+                    }
+                } else {
+                    printf("passive_buzzer: need %zu, have %u\r\n", sizeof(struct PassiveBuzzerConfig), (unsigned)(configLen - 2 - offset));
+                    globalConfig->loaded = false;
+                    return false;
+                }
+                break;
+
+            case CONFIG_PKT_WIFI: // wifi_config - skip this as requested
                 if (offset > configLen) {
                     printf("Offset overflow before wifi\r\n");
                     globalConfig->loaded = false;
@@ -601,10 +631,10 @@ bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConf
     }
     
     globalConfig->loaded = true;
-    printf("Config parsed successfully: version=%d, displays=%d, leds=%d, sensors=%d, data_buses=%d, binary_inputs=%d, nfc=%d, flash=%d\r\n",
+    printf("Config parsed successfully: version=%d, displays=%d, leds=%d, sensors=%d, data_buses=%d, binary_inputs=%d, buzzers=%d, nfc=%d, flash=%d\r\n",
                  globalConfig->version, globalConfig->display_count, globalConfig->led_count,
                  globalConfig->sensor_count, globalConfig->data_bus_count, globalConfig->binary_input_count,
-                 globalConfig->nfc_config_count, globalConfig->flash_config_count);
+                 globalConfig->passive_buzzer_count, globalConfig->nfc_config_count, globalConfig->flash_config_count);
     return true;
 }
 

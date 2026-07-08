@@ -70,6 +70,68 @@ void nrf54_gpio_configure_input(uint8_t cfg, bool pull_up, bool pull_down)
 	(void)gpio_pin_configure(gpio_dev(port), pin, flags);
 }
 
+/* One slot per interrupt-enabled pin. Each slot owns its gpio_callback so the
+ * Zephyr trampoline can recover the registered handler via CONTAINER_OF. */
+#define NRF54_GPIO_IRQ_MAX 8
+
+struct nrf54_gpio_irq_slot {
+	struct gpio_callback cb;
+	nrf54_gpio_irq_handler_t handler;
+	bool used;
+};
+
+static struct nrf54_gpio_irq_slot s_irq_slots[NRF54_GPIO_IRQ_MAX];
+
+static void nrf54_gpio_irq_trampoline(const struct device *dev, struct gpio_callback *cb,
+				      uint32_t pins)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(pins);
+	struct nrf54_gpio_irq_slot *slot =
+		CONTAINER_OF(cb, struct nrf54_gpio_irq_slot, cb);
+
+	if (slot->handler != NULL) {
+		slot->handler();
+	}
+}
+
+int nrf54_gpio_configure_interrupt(uint8_t cfg, nrf54_gpio_irq_handler_t handler)
+{
+	uint8_t port;
+	uint8_t pin;
+	const struct device *dev;
+	struct nrf54_gpio_irq_slot *slot = NULL;
+	int err;
+
+	if (handler == NULL || !nrf54_pin_decode(cfg, &port, &pin)) {
+		return -1;
+	}
+	dev = gpio_dev(port);
+	for (unsigned i = 0; i < NRF54_GPIO_IRQ_MAX; i++) {
+		if (!s_irq_slots[i].used) {
+			slot = &s_irq_slots[i];
+			break;
+		}
+	}
+	if (slot == NULL) {
+		return -1;
+	}
+	slot->handler = handler;
+	slot->used = true;
+	gpio_init_callback(&slot->cb, nrf54_gpio_irq_trampoline, BIT(pin));
+	err = gpio_add_callback(dev, &slot->cb);
+	if (err != 0) {
+		slot->used = false;
+		return err;
+	}
+	err = gpio_pin_interrupt_configure(dev, pin, GPIO_INT_EDGE_BOTH);
+	if (err != 0) {
+		(void)gpio_remove_callback(dev, &slot->cb);
+		slot->used = false;
+	}
+	return err;
+}
+
 void nrf54_gpio_write(uint8_t cfg, bool level_high)
 {
 	uint8_t port;

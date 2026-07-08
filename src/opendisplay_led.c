@@ -79,6 +79,11 @@ static void od_flash_led(const struct LedConfig *led, uint8_t color, uint8_t bri
   bool inv_g = (led->led_flags & LED_FLAG_INVERT_GREEN) != 0u;
   bool inv_b = (led->led_flags & LED_FLAG_INVERT_BLUE) != 0u;
 
+  /* 8-level software-PWM brightness ramp, matching the reference nRF52840
+   * flashLed (device_control.cpp:471-499): seven 100us slices per brightness
+   * step compare the 3-bit red/green (0..7) and 2-bit blue (0..3) intensities
+   * against a bit-reversed threshold order (7,1,6,2,5,3,4 for R/G;
+   * 3,1,2 for B) to spread the duty cycle evenly. */
   for (uint16_t i = 0; i < brightness; i++) {
     od_gpio_write(led->led_1_r, inv_r ? !(colorred >= 7u) : (colorred >= 7u));
     od_gpio_write(led->led_2_g, inv_g ? !(colorgreen >= 7u) : (colorgreen >= 7u));
@@ -86,6 +91,23 @@ static void od_flash_led(const struct LedConfig *led, uint8_t color, uint8_t bri
     k_busy_wait(LED_PWM_DELAY_US);
     od_gpio_write(led->led_1_r, inv_r ? !(colorred >= 1u) : (colorred >= 1u));
     od_gpio_write(led->led_2_g, inv_g ? !(colorgreen >= 1u) : (colorgreen >= 1u));
+    k_busy_wait(LED_PWM_DELAY_US);
+    od_gpio_write(led->led_1_r, inv_r ? !(colorred >= 6u) : (colorred >= 6u));
+    od_gpio_write(led->led_2_g, inv_g ? !(colorgreen >= 6u) : (colorgreen >= 6u));
+    od_gpio_write(led->led_3_b, inv_b ? !(colorblue >= 1u) : (colorblue >= 1u));
+    k_busy_wait(LED_PWM_DELAY_US);
+    od_gpio_write(led->led_1_r, inv_r ? !(colorred >= 2u) : (colorred >= 2u));
+    od_gpio_write(led->led_2_g, inv_g ? !(colorgreen >= 2u) : (colorgreen >= 2u));
+    k_busy_wait(LED_PWM_DELAY_US);
+    od_gpio_write(led->led_1_r, inv_r ? !(colorred >= 5u) : (colorred >= 5u));
+    od_gpio_write(led->led_2_g, inv_g ? !(colorgreen >= 5u) : (colorgreen >= 5u));
+    k_busy_wait(LED_PWM_DELAY_US);
+    od_gpio_write(led->led_1_r, inv_r ? !(colorred >= 3u) : (colorred >= 3u));
+    od_gpio_write(led->led_2_g, inv_g ? !(colorgreen >= 3u) : (colorgreen >= 3u));
+    od_gpio_write(led->led_3_b, inv_b ? !(colorblue >= 2u) : (colorblue >= 2u));
+    k_busy_wait(LED_PWM_DELAY_US);
+    od_gpio_write(led->led_1_r, inv_r ? !(colorred >= 4u) : (colorred >= 4u));
+    od_gpio_write(led->led_2_g, inv_g ? !(colorgreen >= 4u) : (colorgreen >= 4u));
     k_busy_wait(LED_PWM_DELAY_US);
     od_led_all_off(led);
   }

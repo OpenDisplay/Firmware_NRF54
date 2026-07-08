@@ -22,6 +22,16 @@ typedef struct {
 static ButtonState s_buttons[MAX_BUTTONS];
 static uint8_t s_button_count;
 
+/* Set from GPIO ISR context (both-edges interrupt). The ISR does NO I2C/BLE
+ * work: it only raises this flag, which opendisplay_button_process() consumes on
+ * the main loop. Polling remains as a fallback in case an edge is missed. */
+static volatile bool s_button_irq_pending;
+
+static void button_irq_handler(void)
+{
+  s_button_irq_pending = true;
+}
+
 static bool read_logical_pressed(const ButtonState *btn)
 {
   bool level = nrf54_gpio_read(btn->pin) != 0;
@@ -66,17 +76,30 @@ void opendisplay_button_init(void)
       btn->byte_index = input->button_data_byte_index;
       btn->pin = pin;
       btn->inverted = (input->invert & (1u << pin_idx)) != 0u;
-      nrf54_gpio_configure_input(pin, (input->pullups & (1u << pin_idx)) != 0u, false);
+      bool pull_up = (input->pullups & (1u << pin_idx)) != 0u;
+      bool pull_down = (input->pulldowns & (1u << pin_idx)) != 0u;
+      nrf54_gpio_configure_input(pin, pull_up, pull_down);
       btn->current_state = read_logical_pressed(btn) ? 1u : 0u;
       btn->initialized = true;
-      printf("[OD] button id=%u pin=0x%02X byte=%u\r\n", (unsigned)btn->button_id, (unsigned)pin,
-             (unsigned)btn->byte_index);
+      /* Attach a both-edges interrupt (reference uses CHANGE, device_control.cpp:604).
+       * On failure we still have the polling path in _process(). */
+      if (nrf54_gpio_configure_interrupt(pin, button_irq_handler) != 0) {
+        printf("[OD] button pin=0x%02X interrupt setup failed; polling only\r\n",
+               (unsigned)pin);
+      }
+      printf("[OD] button id=%u pin=0x%02X byte=%u pull=%s\r\n", (unsigned)btn->button_id,
+             (unsigned)pin, (unsigned)btn->byte_index,
+             pull_up ? "up" : (pull_down ? "down" : "none"));
     }
   }
 }
 
 void opendisplay_button_process(void)
 {
+  /* Consume any interrupt signal. The actual state change is detected by the
+   * poll below (edge-agnostic), which also covers a missed/coalesced edge. */
+  s_button_irq_pending = false;
+
   for (uint8_t i = 0; i < s_button_count; i++) {
     ButtonState *btn = &s_buttons[i];
     bool pressed;

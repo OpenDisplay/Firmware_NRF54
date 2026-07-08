@@ -5,6 +5,16 @@
 	chosen {
 		zephyr,console = &uart20;
 	};
+
+	/*
+	 * Expose all 8 SAADC channels (board DTS channel@0..7 => AIN0..AIN7) so
+	 * the battery driver can pick one at runtime by index from the
+	 * configured battery_sense_pin (P1.0n => AINn).
+	 */
+	zephyr,user {
+		io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>,
+			      <&adc 4>, <&adc 5>, <&adc 6>, <&adc 7>;
+	};
 };
 
 /*
