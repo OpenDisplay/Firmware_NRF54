@@ -75,12 +75,20 @@ int opendisplay_map_epd(int id)
     case 0x0044: return EP42B_400x300_4GRAY;
     case 0x0045: return EP397_800x480;
     case 0x0046: return EP397_800x480_4GRAY;
-    case 0x0047: return EP_PANEL_UNDEFINED;
-    case 0x0048: return EP_PANEL_UNDEFINED;
-    case 0x0049: return EP213Z_122x250;
-    case 0x004A: return EP_PANEL_UNDEFINED;
-    case 0x004B: return EP27B_176x264;
-    case 0x004C: return EP_PANEL_UNDEFINED;
+    /* Protocol IDs 0x0047-0x004C map (in the Arduino reference Firmware) to panels
+       whose definitions do not exist in the vendored third_party/bb_epaper here:
+       EP368_792x528, EP368_792x528_4GRAY, EP213ZZ_122x250, EP40_SPECTRA_400x600 and
+       EP27_176x264(/_4GRAY). Adding real support needs their init sequences/waveforms
+       vendored into bb_epaper. Until then: unavailable panels are dropped (UNDEFINED),
+       and 0x0049/0x004B fall back to the closest existing variant (EP213Z for EP213ZZ,
+       EP27B for EP27) - a substitution that may render incorrectly on those exact
+       panels. Follow-up: vendor the missing panels and give each its own mapping. */
+    case 0x0047: return EP_PANEL_UNDEFINED;               /* EP368_792x528 - not vendored */
+    case 0x0048: return EP_PANEL_UNDEFINED;               /* EP368_792x528_4GRAY - not vendored */
+    case 0x0049: return EP213Z_122x250;                   /* EP213ZZ - substituted with EP213Z */
+    case 0x004A: return EP_PANEL_UNDEFINED;               /* EP40_SPECTRA_400x600 - not vendored */
+    case 0x004B: return EP27B_176x264;                    /* EP27 - substituted with EP27B */
+    case 0x004C: return EP_PANEL_UNDEFINED;               /* EP27_176x264_4GRAY - not vendored */
     default: return EP_PANEL_UNDEFINED;
   }
 }

@@ -36,8 +36,16 @@ struct PowerOption {
   uint16_t voltage_scaling_factor;
   uint32_t deep_sleep_current_ua;
   uint16_t deep_sleep_time_seconds;
-  uint8_t reserved[10];
+  uint8_t charge_enable_pin;      /* BQ25616 CE (0 or 0xFF = unused) */
+  uint8_t charge_state_pin;       /* charge-state GPIO (0 or 0xFF = unused) */
+  uint8_t charger_flags;          /* bit0 enable active-low; bit1 state active-low when charging */
+  uint8_t reserved[7];
 } __attribute__((packed));
+
+#define CHARGER_FLAG_ENABLE_ACTIVE_LOW (1u << 0)
+#define CHARGER_FLAG_STATE_ACTIVE_LOW  (1u << 1)
+/* battery_sense_flags (power_option) */
+#define BATTERY_SENSE_FLAG_ENABLE_INVERTED (1u << 0)
 
 struct DisplayConfig {
   uint8_t instance_number;
@@ -79,11 +87,20 @@ struct LedConfig {
   uint8_t reserved[15];
 } __attribute__((packed));
 
+/* 0x23: sensor_data (repeatable, max 4 instances) */
+#define SENSOR_TYPE_TEMPERATURE 0x0001u
+#define SENSOR_TYPE_HUMIDITY    0x0002u
+#define SENSOR_TYPE_AXP2101     0x0003u
+#define SENSOR_TYPE_SHT40       0x0004u
+#define SENSOR_TYPE_BQ27220     0x0005u
+
 struct SensorData {
   uint8_t instance_number;
   uint16_t sensor_type;
   uint8_t bus_id;
-  uint8_t reserved[26];
+  uint8_t i2c_addr_7bit;       /* 0 or 0xFF = per-sensor default (SHT40 0x44, BQ27220 0x55) */
+  uint8_t msd_data_start_byte; /* SHT40: 3-byte block (0/0xFF=default 7); BQ27220: 1 byte (0xFF=skip) */
+  uint8_t reserved[24];
 } __attribute__((packed));
 
 struct DataBus {
@@ -146,6 +163,19 @@ struct TouchController {
   uint8_t touch_data_start_byte; /* first of 5 MSD dynamic bytes (0-6) */
   uint8_t enable_pin;         /* optional touch panel power enable; 0/0xFF = unused */
   uint8_t reserved[20];
+/* 0x29: passive_buzzer (repeatable, max 4 instances). On-wire layout matches the
+ * Arduino reference Firmware src/structs.h PassiveBuzzerConfig exactly (32 bytes).
+ * Frequency in the 0x0077 payload: 0 = silence/rest; 1-255 maps linearly to a
+ * firmware-defined Hz range (not stored in config). */
+#define BUZZER_FLAG_ENABLE_ACTIVE_HIGH (1u << 0)
+
+struct PassiveBuzzerConfig {
+  uint8_t instance_number;
+  uint8_t drive_pin;      /* (port<<4)|pin PWM / square wave to buzzer (+ transistor) */
+  uint8_t enable_pin;     /* Optional enable (e.g. FET); 0xFF = unused */
+  uint8_t flags;          /* BUZZER_FLAG_* */
+  uint8_t duty_percent;   /* 1-100 PWM duty; 0 = default 50 */
+  uint8_t reserved[27];
 } __attribute__((packed));
 
 struct NfcConfig {
@@ -214,6 +244,8 @@ struct GlobalConfig {
   uint8_t binary_input_count;
   struct TouchController touch_controllers[4];
   uint8_t touch_controller_count;
+  struct PassiveBuzzerConfig passive_buzzers[4];
+  uint8_t passive_buzzer_count;
   struct NfcConfig nfc_configs[2];
   uint8_t nfc_config_count;
   struct FlashConfig flash_configs[2];
