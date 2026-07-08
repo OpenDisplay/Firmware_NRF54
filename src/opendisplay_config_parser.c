@@ -376,6 +376,26 @@ bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConf
                     return false;
                 }
                 break;
+
+            case CONFIG_PKT_TOUCH: // touch_controller (0x28) - parse but don't log
+                if (offset > configLen) {
+                    printf("Offset overflow before touch_controller\r\n");
+                    globalConfig->loaded = false;
+                    return false;
+                }
+                if (globalConfig->touch_controller_count < 4 && offset + sizeof(struct TouchController) <= configLen - 2) {
+                    memcpy(&globalConfig->touch_controllers[globalConfig->touch_controller_count], &configData[offset], sizeof(struct TouchController));
+                    offset += sizeof(struct TouchController);
+                    if (offset > configLen) {
+                        printf("Offset overflow after touch_controller\r\n");
+                        globalConfig->loaded = false;
+                        return false;
+                    }
+                    globalConfig->touch_controller_count++;
+                } else if (globalConfig->touch_controller_count >= 4) {
+                    offset += sizeof(struct TouchController);
+                    if (offset > configLen) {
+                        printf("Offset overflow after touch_controller (skipped)\r\n");
                 
             case CONFIG_PKT_PASSIVE_BUZZER: // passive_buzzer (0x29) - parse but don't log
                 if (offset > configLen) {
@@ -400,6 +420,7 @@ bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConf
                         return false;
                     }
                 } else {
+                    printf("touch_controller: need %zu, have %u\r\n", sizeof(struct TouchController), (unsigned)(configLen - 2 - offset));
                     printf("passive_buzzer: need %zu, have %u\r\n", sizeof(struct PassiveBuzzerConfig), (unsigned)(configLen - 2 - offset));
                     globalConfig->loaded = false;
                     return false;

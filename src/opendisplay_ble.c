@@ -5,6 +5,7 @@
 #include "opendisplay_display.h"
 #include "opendisplay_button.h"
 #include "opendisplay_led.h"
+#include "opendisplay_touch.h"
 #include "opendisplay_buzzer.h"
 #include "opendisplay_pipe.h"
 #include "opendisplay_battery.h"
@@ -554,6 +555,7 @@ void opendisplay_ble_init(void)
 	}
 
 	opendisplay_button_init();
+	opendisplay_touch_init();
 	k_work_init_delayable(&s_adv_restart_work, adv_work_handler);
 	apply_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_ADV, 0);
 	update_msd_payload();
@@ -569,6 +571,7 @@ void opendisplay_ble_process(void)
 	opendisplay_led_process();
 	opendisplay_buzzer_process();
 	opendisplay_button_process();
+	opendisplay_touch_process();
 	opendisplay_ble_advertising_tick();
 
 	/* Fallback if the delayed work restart fails or was cancelled. */
