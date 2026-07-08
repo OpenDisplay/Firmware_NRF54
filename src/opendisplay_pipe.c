@@ -1207,10 +1207,10 @@ static void dispatch(uint8_t connection, uint16_t cmd, const uint8_t *payload, u
       opendisplay_ble_schedule_dfu();
       break;
     case CMD_DEEP_SLEEP:
-      {
-        uint8_t ok[] = { 0x00u, RESP_DEEP_SLEEP };
-        pipe_send(connection, ok, sizeof(ok));
-      }
+      /* Match the reference nRF52840 build (device_control.cpp:691-705): the
+       * command is recognized and logged but NO response is sent, so clients do
+       * not treat deep sleep as supported on this target. (Composes with the
+       * separate DFU-honesty question for 0x0051, handled elsewhere.) */
       opendisplay_ble_schedule_deep_sleep();
       break;
     case CMD_LED_ACTIVATE: {

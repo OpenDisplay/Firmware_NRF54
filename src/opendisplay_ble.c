@@ -18,7 +18,9 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/gap.h>
 #include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/hci_vs.h>
 #include <zephyr/bluetooth/uuid.h>
+#include <zephyr/sys/byteorder.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/sensor.h>
@@ -32,9 +34,12 @@
 #define OD_APP_VERSION         0x0100u
 #endif
 
-/* BLE adv interval units are 0.625 ms (same as nRF52840 Firmware). */
-#define OD_ADV_INTERVAL_MIN       BT_GAP_ADV_SLOW_INT_MIN /* 1600 = 1000 ms (~1 adv/s) */
-#define OD_ADV_INTERVAL_MAX       BT_GAP_ADV_SLOW_INT_MIN
+/* BLE adv interval units are 0.625 ms (same as nRF52840 Firmware). Matches the
+ * reference nRF window (NRF_ADV_INTERVAL_MIN/MAX, ble_init.cpp:48-49): a 160 ms
+ * floor for faster discovery up to a 1000 ms ceiling; the controller picks a
+ * value within the window. */
+#define OD_ADV_INTERVAL_MIN       256u                   /* 160 ms */
+#define OD_ADV_INTERVAL_MAX       BT_GAP_ADV_SLOW_INT_MIN /* 1600 = 1000 ms (~1 adv/s) */
 #define OD_ADV_BOOST_INTERVAL_MIN 32u   /* 20 ms */
 #define OD_ADV_BOOST_INTERVAL_MAX 48u   /* 30 ms */
 #define OD_ADV_BOOST_MS           3000u
@@ -50,6 +55,7 @@ static uint32_t s_adv_boost_until_ms;
 static uint8_t s_msd_loop_counter;
 static uint32_t s_last_adv_retry_ms;
 static uint8_t s_reboot_flag = 1; /* set after boot, cleared on first BLE connect */
+static uint8_t s_connection_requested; /* MSD status bit2; see opendisplay_ble_set_connection_requested */
 static uint8_t s_last_published_msd[MSD_PAYLOAD_LEN];
 static bool s_msd_published;
 static bool s_adv_was_boosted;
@@ -62,6 +68,7 @@ static bool s_adv_work_msd_publish;
 
 static int start_advertising(void);
 static bool publish_msd_to_advertising(void);
+static void apply_tx_power(uint8_t handle_type, uint16_t handle);
 
 static void adv_work_handler(struct k_work *work)
 {
@@ -153,10 +160,12 @@ static void update_msd_payload(void)
 	}
 	temperature_byte = (uint8_t)temp_encoded;
 	battery_voltage_low_byte = (uint8_t)(battery_voltage_10mv & 0xFFu);
-	/* Matches nRF52840 Firmware: bit1 rebootFlag, bit2 connectionRequested
-	 * (reserved, 0), bits 4-7 loop counter. */
+	/* Matches nRF52840 Firmware status byte (display_service.cpp:1293-1297):
+	 * bit0 battery high bit, bit1 rebootFlag, bit2 connectionRequested,
+	 * bits 4-7 loop counter. */
 	status_byte = (uint8_t)(((battery_voltage_10mv >> 8) & 0x01u) |
 				((s_reboot_flag & 0x01u) << 1) |
+				((s_connection_requested & 0x01u) << 2) |
 				((s_msd_loop_counter & 0x0Fu) << 4));
 
 	memset(msd_payload, 0, sizeof(msd_payload));
@@ -261,6 +270,15 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	s_conn = bt_conn_ref(conn);
 	s_adv_active = false;
 	s_reboot_flag = 0;
+#if defined(CONFIG_BT_HCI_VS)
+	{
+		uint16_t conn_handle = 0;
+
+		if (bt_hci_get_conn_handle(conn, &conn_handle) == 0) {
+			apply_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_CONN, conn_handle);
+		}
+	}
+#endif
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -334,11 +352,63 @@ void opendisplay_ble_pipe_on_connection_closed(void)
 	opendisplay_pipe_on_connection_closed();
 }
 
+void opendisplay_ble_set_connection_requested(bool requested)
+{
+	s_connection_requested = requested ? 1u : 0u;
+}
+
 void opendisplay_ble_set_dynamic_byte(uint8_t index, uint8_t value)
 {
 	if (index < sizeof(dynamic_return)) {
 		dynamic_return[index] = value;
 	}
+}
+
+/*
+ * Apply the configured TX power (power_option.tx_power, dBm as a signed int8).
+ * The reference nRF52840 build calls Bluefruit.setTxPower(power_option.tx_power)
+ * once at init (ble_init.cpp:90). On Zephyr with the SoftDevice Controller there
+ * is no stable bt_le_* runtime API for this, so use the standard HCI vendor-
+ * specific Write_Tx_Power_Level command (as in Zephyr's hci_pwr_ctrl sample):
+ * the controller clamps the requested value to its supported set and returns the
+ * value it actually selected, which we log. handle_type selects advertising vs a
+ * specific connection.
+ */
+static void apply_tx_power(uint8_t handle_type, uint16_t handle)
+{
+#if defined(CONFIG_BT_HCI_VS)
+	int8_t requested = (int8_t)s_od_global_config.power_option.tx_power;
+	struct bt_hci_cp_vs_write_tx_power_level *cp;
+	struct bt_hci_rp_vs_write_tx_power_level *rp;
+	struct net_buf *buf;
+	struct net_buf *rsp = NULL;
+	int err;
+
+	buf = bt_hci_cmd_alloc(K_FOREVER);
+	if (buf == NULL) {
+		printf("[OD] tx_power: no HCI cmd buffer\r\n");
+		return;
+	}
+	cp = net_buf_add(buf, sizeof(*cp));
+	cp->handle = sys_cpu_to_le16(handle);
+	cp->handle_type = handle_type;
+	cp->tx_power_level = requested;
+
+	err = bt_hci_cmd_send_sync(BT_HCI_OP_VS_WRITE_TX_POWER_LEVEL, buf, &rsp);
+	if (err != 0) {
+		printf("[OD] tx_power set failed (type=%u req=%d dBm): %d\r\n",
+		       (unsigned)handle_type, (int)requested, err);
+		return;
+	}
+	rp = (struct bt_hci_rp_vs_write_tx_power_level *)rsp->data;
+	printf("[OD] tx_power type=%u requested=%d selected=%d dBm\r\n",
+	       (unsigned)handle_type, (int)requested, (int)rp->selected_tx_power);
+	net_buf_unref(rsp);
+#else
+	ARG_UNUSED(handle_type);
+	ARG_UNUSED(handle);
+	printf("[OD] tx_power: CONFIG_BT_HCI_VS disabled; not applied\r\n");
+#endif
 }
 
 static void apply_adv_interval(void)
@@ -416,6 +486,8 @@ void opendisplay_ble_reload_config_from_nvm(void)
 		memset(&s_od_global_config, 0, sizeof(s_od_global_config));
 	}
 	flash_powerdown_from_config();
+	/* Re-apply advertising TX power in case the new config changed it. */
+	apply_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_ADV, 0);
 }
 
 void opendisplay_ble_restart_advertising(void)
@@ -483,6 +555,7 @@ void opendisplay_ble_init(void)
 
 	opendisplay_button_init();
 	k_work_init_delayable(&s_adv_restart_work, adv_work_handler);
+	apply_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_ADV, 0);
 	update_msd_payload();
 	(void)start_advertising();
 	printf("[OD] BLE ready as %s\r\n", s_dev_name);
