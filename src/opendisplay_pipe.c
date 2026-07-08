@@ -491,9 +491,26 @@ static void pipe_send_raw(uint8_t connection, const uint8_t *data, uint16_t len)
   if (!s_notify || len == 0u) {
     return;
   }
-  if (!opendisplay_ble_pipe_notify(data, len)) {
-    printf("[OD] pipe notify failed len=%u\r\n", (unsigned)len);
+  /*
+   * bt_gatt_notify() returns -ENOMEM (notify → false) when the TX buffer pool is
+   * momentarily exhausted; it never blocks. A single response almost always
+   * succeeds on the first try. A multi-chunk config read (now up to
+   * (MAX_CONFIG_SIZE+93)/94 = 44 notifications back-to-back) can outrun the pool,
+   * so retry with a short yield while the link is still up — buffers free as the
+   * BT RX thread processes completions. This keeps the pool small (prj.conf) yet
+   * lets large reads through without dropping chunks. Bail if notifications are
+   * no longer enabled (disconnected), so a dead link cannot spin here.
+   */
+  for (int attempt = 0; attempt < 200; attempt++) {
+    if (opendisplay_ble_pipe_notify(data, len)) {
+      return;
+    }
+    if (!opendisplay_ble_pipe_notify_enabled()) {
+      break;
+    }
+    k_msleep(1);
   }
+  printf("[OD] pipe notify failed len=%u\r\n", (unsigned)len);
 }
 
 static void pipe_send(uint8_t connection, const uint8_t *data, uint16_t len)
@@ -768,7 +785,13 @@ static void handle_config_read(uint8_t connection)
 {
   static uint8_t config_data[MAX_CONFIG_SIZE];
   uint32_t config_len = MAX_CONFIG_SIZE;
-  const uint16_t max_chunks = 10u;
+  /* Derive the chunk cap from MAX_CONFIG_SIZE like the reference firmware
+   * (communication.cpp: (MAX_CONFIG_SIZE + 93) / 94). Each chunk carries at
+   * least 94 config bytes (chunk 0: 100-byte response - 2 status - 2 chunk# - 2
+   * total-len; later chunks carry 96), so 94 is the conservative per-chunk rate.
+   * The old hardcoded 10 truncated any read past ~940 bytes. Flow control in
+   * pipe_send_raw keeps the larger burst from dropping chunks on a full TX pool. */
+  const uint16_t max_chunks = (uint16_t)((MAX_CONFIG_SIZE + 93) / 94);
 
   if (!initConfigStorage()) {
     uint8_t err[] = { 0xFFu, RESP_CONFIG_READ, 0x00u, 0x00u };

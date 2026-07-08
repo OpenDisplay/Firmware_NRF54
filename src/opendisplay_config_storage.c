@@ -35,7 +35,11 @@ bool initConfigStorage(void)
 
 bool saveConfig(uint8_t *config_data, uint32_t len)
 {
-	opendisplay_config_storage_t rec;
+	/* static, not on the stack: opendisplay_config_storage_t is ~4 KB with the
+	 * 4096-byte MAX_CONFIG_SIZE, which would blow CONFIG_MAIN_STACK_SIZE (4096).
+	 * Config writes are serialized on the main thread, so a single scratch is
+	 * safe. */
+	static opendisplay_config_storage_t rec;
 
 	if (len > MAX_CONFIG_SIZE) {
 		return false;
@@ -46,15 +50,22 @@ bool saveConfig(uint8_t *config_data, uint32_t len)
 	rec.data_len = len;
 	rec.crc = calculateConfigCRC(config_data, len);
 	memcpy(rec.data, config_data, len);
+	/* Commit the RAM cache only after the write succeeds: on failure the cache
+	 * must keep reporting the last persisted config, not an unsaved one. */
+	if (settings_save_one(OD_SETTINGS_KEY, &rec,
+			      offsetof(opendisplay_config_storage_t, data) + len) != 0) {
+		return false;
+	}
 	s_cached = rec;
 	s_loaded = true;
-	return settings_save_one(OD_SETTINGS_KEY, &rec,
-				 offsetof(opendisplay_config_storage_t, data) + len) == 0;
+	return true;
 }
 
 bool loadConfig(uint8_t *config_data, uint32_t *len)
 {
-	opendisplay_config_storage_t rec;
+	/* static for the same reason as saveConfig: the record is ~4 KB and must
+	 * not sit on the 4 KB main stack. */
+	static opendisplay_config_storage_t rec;
 	ssize_t got;
 
 	if (config_data == NULL || len == NULL) {

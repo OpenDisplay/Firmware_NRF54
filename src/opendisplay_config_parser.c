@@ -99,6 +99,45 @@ static uint16_t config_toolbox_outer_crc16(const uint8_t *data, uint32_t body_le
     return crc;
 }
 
+/*
+ * On-wire data size (excluding the 2-byte [number][type] header) of every known
+ * config packet type. Returns 0 for a genuinely unknown type.
+ *
+ * These sizes are cross-checked three ways and all agree: the reference firmware
+ * structs (Firmware/src/structs.h), this port's structs (opendisplay_structs.h),
+ * and the py-opendisplay serializer docstrings (protocol/config_serializer.py).
+ * The one place the old code disagreed with the wire was wifi_config (0x26):
+ * this port skipped a hardcoded 162 bytes, but the serializer emits 160
+ * ("Serialize WifiConfig to 160 bytes") and the reference struct is 160 — the
+ * extra 2 bytes desynced every packet after wifi. Corrected to 160 here.
+ *
+ * 0x28 (touch_controller) and 0x29 (passive_buzzer) have no parse case on this
+ * branch, but are sized here so the default branch skips them by their true size
+ * instead of dropping every packet after them. Sibling PRs add real parse cases;
+ * the sized skip is exactly what lets those branches stay independent.
+ */
+static uint16_t config_packet_data_size(uint8_t packetId)
+{
+    switch (packetId) {
+        case CONFIG_PKT_SYSTEM:        return 22u;   /* 0x01 system_config      */
+        case CONFIG_PKT_MANUFACTURER:  return 22u;   /* 0x02 manufacturer_data  */
+        case CONFIG_PKT_POWER:         return 30u;   /* 0x04 power_option       */
+        case CONFIG_PKT_DISPLAY:       return 46u;   /* 0x20 display            */
+        case CONFIG_PKT_LED:           return 22u;   /* 0x21 led                */
+        case CONFIG_PKT_SENSOR:        return 30u;   /* 0x23 sensor_data        */
+        case CONFIG_PKT_DATA_BUS:      return 30u;   /* 0x24 data_bus           */
+        case CONFIG_PKT_BINARY_INPUT:  return 30u;   /* 0x25 binary_inputs      */
+        case CONFIG_PKT_WIFI:          return 160u;  /* 0x26 wifi_config        */
+        case CONFIG_PKT_SECURITY:      return 64u;   /* 0x27 security_config    */
+        case CONFIG_PKT_TOUCH:         return 32u;   /* 0x28 touch_controller   */
+        case CONFIG_PKT_PASSIVE_BUZZER:return 32u;   /* 0x29 passive_buzzer     */
+        case CONFIG_PKT_NFC:           return 32u;   /* 0x2A nfc_config         */
+        case CONFIG_PKT_FLASH:         return 32u;   /* 0x2B flash_config       */
+        case CONFIG_PKT_DATA_EXTENDED: return 288u;  /* 0x2C data_extended      */
+        default:                       return 0u;
+    }
+}
+
 bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConfig* globalConfig) {
     if (globalConfig == NULL || configData == NULL) {
         printf("Invalid parameters for parseConfigBytes\n");
@@ -377,20 +416,29 @@ bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConf
                 }
                 break;
                 
-            case CONFIG_PKT_WIFI: // wifi_config - skip this as requested
+            case CONFIG_PKT_WIFI: // wifi_config (0x26)
+                /* The nRF54 radio has no Wi-Fi, but the packet is still parsed and
+                 * stored (not skipped) so a client's Wi-Fi settings survive a config
+                 * read-back. The old code skipped a hardcoded 162 bytes; the packet
+                 * is 160 bytes on the wire, so that off-by-2 desynced every packet
+                 * after wifi. */
                 if (offset > configLen) {
                     printf("Offset overflow before wifi\r\n");
                     globalConfig->loaded = false;
                     return false;
                 }
-                if (offset + 162 <= configLen - 2) {
-                    offset += 162;
+                if (offset + sizeof(struct WifiConfig) <= configLen - 2) {
+                    memcpy(&globalConfig->wifi_config, &configData[offset], sizeof(struct WifiConfig));
+                    globalConfig->wifi_config_loaded = true;
+                    offset += sizeof(struct WifiConfig);
                     if (offset > configLen) {
                         printf("Offset overflow after wifi\r\n");
                         globalConfig->loaded = false;
                         return false;
                     }
                 } else {
+                    printf("wifi_config: need %zu, have %u\r\n",
+                           sizeof(struct WifiConfig), (unsigned)(configLen - 2 - offset));
                     offset = configLen - 2; // Skip to CRC
                 }
                 break;
@@ -503,10 +551,34 @@ bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConf
                 }
                 break;
                 
-            default:
-                printf("Unknown pkt 0x%02X @%u\r\n", packetId, (unsigned)(offset - 2));
-                offset = configLen - 2; // Skip to CRC
+            default: {
+                /*
+                 * A type with no parse case above (e.g. 0x28 touch / 0x29 buzzer on
+                 * this branch). Skip it by its known on-wire size so later packets
+                 * are still parsed, instead of jumping to the CRC and silently
+                 * dropping everything after it. Only a genuinely unknown type ID
+                 * (not in the size table) forces skip-to-CRC, because the TLV format
+                 * carries no per-packet length to recover from.
+                 */
+                uint16_t knownSize = config_packet_data_size(packetId);
+                if (knownSize != 0u) {
+                    if (offset + knownSize <= configLen - 2) {
+                        printf("Known-unparsed pkt 0x%02X @%u, skipping %u B\r\n",
+                               packetId, (unsigned)(offset - 2), (unsigned)knownSize);
+                        offset += knownSize;
+                    } else {
+                        printf("Known-unparsed pkt 0x%02X @%u: need %u, have %u\r\n",
+                               packetId, (unsigned)(offset - 2), (unsigned)knownSize,
+                               (unsigned)(configLen - 2 - offset));
+                        offset = configLen - 2; // Truncated packet; stop.
+                    }
+                } else {
+                    printf("Unknown pkt 0x%02X @%u, skip-to-CRC (drops later pkts)\r\n",
+                           packetId, (unsigned)(offset - 2));
+                    offset = configLen - 2; // Skip to CRC
+                }
                 break;
+            }
         }
     }
     
