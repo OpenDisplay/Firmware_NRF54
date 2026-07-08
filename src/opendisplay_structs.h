@@ -123,6 +123,21 @@ struct BinaryInputs {
   uint8_t reserved[14];
 } __attribute__((packed));
 
+/* 0x29: passive_buzzer (repeatable, max 4 instances). On-wire layout matches the
+ * Arduino reference Firmware src/structs.h PassiveBuzzerConfig exactly (32 bytes).
+ * Frequency in the 0x0077 payload: 0 = silence/rest; 1-255 maps linearly to a
+ * firmware-defined Hz range (not stored in config). */
+#define BUZZER_FLAG_ENABLE_ACTIVE_HIGH (1u << 0)
+
+struct PassiveBuzzerConfig {
+  uint8_t instance_number;
+  uint8_t drive_pin;      /* (port<<4)|pin PWM / square wave to buzzer (+ transistor) */
+  uint8_t enable_pin;     /* Optional enable (e.g. FET); 0xFF = unused */
+  uint8_t flags;          /* BUZZER_FLAG_* */
+  uint8_t duty_percent;   /* 1-100 PWM duty; 0 = default 50 */
+  uint8_t reserved[27];
+} __attribute__((packed));
+
 struct NfcConfig {
   uint8_t instance_number;
   uint8_t nfc_ic_type;
@@ -187,6 +202,8 @@ struct GlobalConfig {
   uint8_t data_bus_count;
   struct BinaryInputs binary_inputs[4];
   uint8_t binary_input_count;
+  struct PassiveBuzzerConfig passive_buzzers[4];
+  uint8_t passive_buzzer_count;
   struct NfcConfig nfc_configs[2];
   uint8_t nfc_config_count;
   struct FlashConfig flash_configs[2];

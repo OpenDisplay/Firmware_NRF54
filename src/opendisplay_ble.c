@@ -5,6 +5,7 @@
 #include "opendisplay_display.h"
 #include "opendisplay_button.h"
 #include "opendisplay_led.h"
+#include "opendisplay_buzzer.h"
 #include "opendisplay_pipe.h"
 #include "board_nrf54.h"
 
@@ -455,6 +456,7 @@ void opendisplay_ble_init(void)
 	read_chip_temperature_once();
 
 	opendisplay_led_init();
+	opendisplay_buzzer_init();
 	opendisplay_display_boot_apply();
 
 	err = bt_enable(NULL);
@@ -479,6 +481,7 @@ void opendisplay_ble_process(void)
 
 	opendisplay_pipe_process();
 	opendisplay_led_process();
+	opendisplay_buzzer_process();
 	opendisplay_button_process();
 	opendisplay_ble_advertising_tick();
 
