@@ -216,6 +216,22 @@ struct FlashConfig {
   uint8_t reserved[20];
 } __attribute__((packed));
 
+/*
+ * 0x26: wifi_config (singleton, 160 bytes on the wire). Exact reference layout
+ * (Firmware/src/structs.h struct WifiConfig). The nRF54 radio has no Wi-Fi, so
+ * this is stored purely so a client's Wi-Fi config is preserved across a
+ * config read-back rather than dropped. Note the reference packs the server
+ * host/port into reserved[]; server_port is the one big-endian field in the
+ * TLV format (reserved[64] high byte, reserved[65] low byte) — left as raw
+ * bytes here since this port does not consume it.
+ */
+struct WifiConfig {
+  uint8_t ssid[32];
+  uint8_t password[32];
+  uint8_t encryption_type;
+  uint8_t reserved[95];
+} __attribute__((packed));
+
 struct DataExtended {
   uint8_t manufacturer_name[32];
   uint8_t model_name[32];
@@ -252,6 +268,8 @@ struct GlobalConfig {
   uint8_t flash_config_count;
   struct DataExtended data_extended;
   bool data_extended_loaded;
+  struct WifiConfig wifi_config;
+  bool wifi_config_loaded;
   uint8_t version;
   uint8_t minor_version;
   bool loaded;

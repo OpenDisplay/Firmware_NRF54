@@ -8,6 +8,7 @@
 #include "opendisplay_touch.h"
 #include "opendisplay_buzzer.h"
 #include "opendisplay_pipe.h"
+#include "factory_config.h"
 #include "opendisplay_battery.h"
 #include "opendisplay_sensor_sht40.h"
 #include "opendisplay_sensor_bq27220.h"
@@ -528,7 +529,17 @@ void opendisplay_ble_init(void)
 	int err;
 
 	(void)initConfigStorage();
-	if (loadGlobalConfig(&s_od_global_config)) {
+#ifdef FACTORY_CLEAR_CONFIG_ON_BOOT
+	/* One-shot clear build (scripts/factory_config_gen.py). */
+	printf("[OD] factory clear build: erasing stored config\r\n");
+	(void)clearStoredConfig();
+#endif
+	bool config_loaded = loadGlobalConfig(&s_od_global_config);
+	if (!config_loaded && tryProvisionFactoryEmbed()) {
+		/* No valid stored config, but a factory embed was just provisioned. */
+		config_loaded = loadGlobalConfig(&s_od_global_config);
+	}
+	if (config_loaded) {
 		printf("[OD] config loaded: displays=%u\r\n",
 		       (unsigned)s_od_global_config.display_count);
 	} else {
