@@ -36,8 +36,16 @@ struct PowerOption {
   uint16_t voltage_scaling_factor;
   uint32_t deep_sleep_current_ua;
   uint16_t deep_sleep_time_seconds;
-  uint8_t reserved[10];
+  uint8_t charge_enable_pin;      /* BQ25616 CE (0 or 0xFF = unused) */
+  uint8_t charge_state_pin;       /* charge-state GPIO (0 or 0xFF = unused) */
+  uint8_t charger_flags;          /* bit0 enable active-low; bit1 state active-low when charging */
+  uint8_t reserved[7];
 } __attribute__((packed));
+
+#define CHARGER_FLAG_ENABLE_ACTIVE_LOW (1u << 0)
+#define CHARGER_FLAG_STATE_ACTIVE_LOW  (1u << 1)
+/* battery_sense_flags (power_option) */
+#define BATTERY_SENSE_FLAG_ENABLE_INVERTED (1u << 0)
 
 struct DisplayConfig {
   uint8_t instance_number;
@@ -79,11 +87,20 @@ struct LedConfig {
   uint8_t reserved[15];
 } __attribute__((packed));
 
+/* 0x23: sensor_data (repeatable, max 4 instances) */
+#define SENSOR_TYPE_TEMPERATURE 0x0001u
+#define SENSOR_TYPE_HUMIDITY    0x0002u
+#define SENSOR_TYPE_AXP2101     0x0003u
+#define SENSOR_TYPE_SHT40       0x0004u
+#define SENSOR_TYPE_BQ27220     0x0005u
+
 struct SensorData {
   uint8_t instance_number;
   uint16_t sensor_type;
   uint8_t bus_id;
-  uint8_t reserved[26];
+  uint8_t i2c_addr_7bit;       /* 0 or 0xFF = per-sensor default (SHT40 0x44, BQ27220 0x55) */
+  uint8_t msd_data_start_byte; /* SHT40: 3-byte block (0/0xFF=default 7); BQ27220: 1 byte (0xFF=skip) */
+  uint8_t reserved[24];
 } __attribute__((packed));
 
 struct DataBus {

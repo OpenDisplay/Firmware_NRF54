@@ -26,6 +26,10 @@ target_sources(app PRIVATE
   ${SRC_DIR}/nrf54_zephyr_time.c
   ${SRC_DIR}/newlib_stubs.c
   ${SRC_DIR}/opendisplay_ble.c
+  ${SRC_DIR}/opendisplay_battery.c
+  ${SRC_DIR}/opendisplay_i2c.c
+  ${SRC_DIR}/opendisplay_sensor_sht40.c
+  ${SRC_DIR}/opendisplay_sensor_bq27220.c
   ${SRC_DIR}/opendisplay_button.c
   ${SRC_DIR}/opendisplay_config_parser.c
   ${SRC_DIR}/opendisplay_config_storage.c

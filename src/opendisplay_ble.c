@@ -6,6 +6,9 @@
 #include "opendisplay_button.h"
 #include "opendisplay_led.h"
 #include "opendisplay_pipe.h"
+#include "opendisplay_battery.h"
+#include "opendisplay_sensor_sht40.h"
+#include "opendisplay_sensor_bq27220.h"
 #include "board_nrf54.h"
 
 #include <stdio.h>
@@ -128,11 +131,18 @@ static void read_chip_temperature_once(void)
 
 static void update_msd_payload(void)
 {
-	uint16_t battery_voltage_10mv = 0;
+	uint16_t battery_voltage_10mv;
 	int16_t temp_encoded;
 	uint8_t temperature_byte;
 	uint8_t battery_voltage_low_byte;
 	uint8_t status_byte;
+
+	/* Mirror the reference updatemsdata() ordering: refresh the sensor
+	 * dynamic slots, then the battery source (BQ27220-preferred, else SAADC),
+	 * before packing the frame. All three are TTL-cached (30 s). */
+	opendisplay_sensor_sht40_poll();
+	opendisplay_sensor_bq27220_poll();
+	battery_voltage_10mv = opendisplay_battery_get_10mv();
 
 	temp_encoded = (int16_t)((s_chip_temperature + 40.0f) * 2.0f);
 	if (temp_encoded < 0) {
@@ -453,6 +463,9 @@ void opendisplay_ble_init(void)
 	flash_powerdown_from_config();
 
 	read_chip_temperature_once();
+
+	opendisplay_sensor_bq27220_init();
+	opendisplay_sensor_sht40_init();
 
 	opendisplay_led_init();
 	opendisplay_display_boot_apply();
