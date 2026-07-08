@@ -163,6 +163,8 @@ struct TouchController {
   uint8_t touch_data_start_byte; /* first of 5 MSD dynamic bytes (0-6) */
   uint8_t enable_pin;         /* optional touch panel power enable; 0/0xFF = unused */
   uint8_t reserved[20];
+} __attribute__((packed));
+
 /* 0x29: passive_buzzer (repeatable, max 4 instances). On-wire layout matches the
  * Arduino reference Firmware src/structs.h PassiveBuzzerConfig exactly (32 bytes).
  * Frequency in the 0x0077 payload: 0 = silence/rest; 1-255 maps linearly to a

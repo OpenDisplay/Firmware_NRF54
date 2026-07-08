@@ -435,13 +435,16 @@ bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConf
                     offset += sizeof(struct TouchController);
                     if (offset > configLen) {
                         printf("Offset overflow after touch_controller (skipped)\r\n");
-                
-            case CONFIG_PKT_WIFI: // wifi_config (0x26)
-                /* The nRF54 radio has no Wi-Fi, but the packet is still parsed and
-                 * stored (not skipped) so a client's Wi-Fi settings survive a config
-                 * read-back. The old code skipped a hardcoded 162 bytes; the packet
-                 * is 160 bytes on the wire, so that off-by-2 desynced every packet
-                 * after wifi. */
+                        globalConfig->loaded = false;
+                        return false;
+                    }
+                } else {
+                    printf("touch_controller: need %zu, have %u\r\n", sizeof(struct TouchController), (unsigned)(configLen - 2 - offset));
+                    globalConfig->loaded = false;
+                    return false;
+                }
+                break;
+
             case CONFIG_PKT_PASSIVE_BUZZER: // passive_buzzer (0x29) - parse but don't log
                 if (offset > configLen) {
                     printf("Offset overflow before passive_buzzer\r\n");
@@ -465,14 +468,18 @@ bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConf
                         return false;
                     }
                 } else {
-                    printf("touch_controller: need %zu, have %u\r\n", sizeof(struct TouchController), (unsigned)(configLen - 2 - offset));
                     printf("passive_buzzer: need %zu, have %u\r\n", sizeof(struct PassiveBuzzerConfig), (unsigned)(configLen - 2 - offset));
                     globalConfig->loaded = false;
                     return false;
                 }
                 break;
 
-            case CONFIG_PKT_WIFI: // wifi_config - skip this as requested
+            case CONFIG_PKT_WIFI: // wifi_config (0x26)
+                /* The nRF54 radio has no Wi-Fi, but the packet is still parsed and
+                 * stored (not skipped) so a client's Wi-Fi settings survive a config
+                 * read-back. The old code skipped a hardcoded 162 bytes; the packet
+                 * is 160 bytes on the wire, so that off-by-2 desynced every packet
+                 * after wifi. */
                 if (offset > configLen) {
                     printf("Offset overflow before wifi\r\n");
                     globalConfig->loaded = false;
