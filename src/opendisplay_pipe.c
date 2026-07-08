@@ -2,6 +2,7 @@
 #include "opendisplay_ble.h"
 #include "opendisplay_display.h"
 #include "opendisplay_led.h"
+#include "opendisplay_buzzer.h"
 #include "opendisplay_config_storage.h"
 #include "opendisplay_constants.h"
 #include "opendisplay_protocol.h"
@@ -1213,6 +1214,18 @@ static void dispatch(uint8_t connection, uint16_t cmd, const uint8_t *payload, u
         break;
       }
       pipe_send(connection, ok, sizeof(ok));
+      break;
+    }
+    case CMD_BUZZER: {
+      int rc = opendisplay_buzzer_activate(payload, payload_len);
+
+      if (rc == 0) {
+        uint8_t ok[] = { 0x00u, RESP_BUZZER_ACK, 0x00u, 0x00u };
+        pipe_send(connection, ok, sizeof(ok));
+      } else {
+        uint8_t err[] = { 0xFFu, RESP_BUZZER_ACK, (uint8_t)rc, 0x00u };
+        pipe_send(connection, err, sizeof(err));
+      }
       break;
     }
     case CMD_NFC_ENDPOINT:
