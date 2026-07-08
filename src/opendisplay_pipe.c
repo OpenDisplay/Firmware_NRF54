@@ -110,6 +110,20 @@ static void clear_session(void)
   memset(&s_session, 0, sizeof(s_session));
 }
 
+/*
+ * Count a replay/decrypt failure and tear the session down after 3 strikes.
+ * Mirrors the nRF52840 Firmware (encryption.cpp:640-646, 678-683): every
+ * failed nonce-replay check or CCM tag verification increments the counter,
+ * and reaching 3 clears the session so a forced re-auth is required.
+ */
+static void register_integrity_failure(void)
+{
+  s_session.integrity_failures++;
+  if (s_session.integrity_failures >= 3u) {
+    clear_session();
+  }
+}
+
 static bool sec_enabled(void)
 {
   const struct SecurityConfig *sec = od_get_parsed_security();
@@ -130,7 +144,11 @@ static bool session_alive(void)
   }
   now_ms = od_now_ms();
   timeout_ms = (uint32_t)sec->session_timeout_seconds * 1000u;
-  if ((now_ms - s_session.last_activity_ms) > timeout_ms) {
+  /* Absolute session lifetime measured from authentication, matching the
+   * reference checkEncryptionSessionTimeout() (encryption.cpp:205-217) which
+   * expires on age from session_start_time. Using last_activity here would
+   * let a continuously active session live forever. */
+  if ((now_ms - s_session.session_start_ms) > timeout_ms) {
     clear_session();
     return false;
   }
@@ -428,10 +446,12 @@ static bool decrypt_encrypted_payload(uint16_t cmd,
   ad[1] = (uint8_t)(cmd & 0xFFu);
 
   if (!verify_nonce_replay(nonce)) {
+    register_integrity_failure();
     return false;
   }
 
   if (!od_ccm_decrypt(nonce_ccm, ad, cipher, cipher_len, tag, out_plain)) {
+    register_integrity_failure();
     return false;
   }
   if (out_plain[0] > (cipher_len - 1u)) {
@@ -441,6 +461,7 @@ static bool decrypt_encrypted_payload(uint16_t cmd,
   if (*out_plain_len > 0u) {
     memmove(out_plain, &out_plain[1], *out_plain_len);
   }
+  s_session.integrity_failures = 0u;
   s_session.last_activity_ms = od_now_ms();
   return true;
 }
@@ -1138,7 +1159,17 @@ static void dispatch(uint8_t connection, uint16_t cmd, const uint8_t *payload, u
       send_auth_required_response(connection, (uint8_t)(cmd & 0xFFu));
       return;
     }
+    /* Erase the stored config (and thus the old key) before accepting an
+     * unauthenticated rewrite, on BOTH the single-shot and chunked paths.
+     * The reference secure-erases in handleWriteConfig (communication.cpp:372)
+     * and again on the first chunk of handleWriteConfigChunk (:435). A chunked
+     * write starts as CMD_CONFIG_WRITE (erased here) and continues as
+     * CMD_CONFIG_CHUNK; erase on that first chunk too so a session that
+     * expires mid-transfer cannot land a new config over a retained key. */
     if (cmd == CMD_CONFIG_WRITE) {
+      (void)clearStoredConfig();
+    } else if (cmd == CMD_CONFIG_CHUNK && s_cfg_chunk.active &&
+               s_cfg_chunk.received_chunks == 1u) {
       (void)clearStoredConfig();
     }
 #endif
@@ -1269,18 +1300,35 @@ static void on_pipe_write(uint8_t connection, const uint8_t *data, uint16_t len,
   cmd = (uint16_t)(((uint16_t)frame[0] << 8) | frame[1]);
   printf("[OD] rx cmd=0x%04X len=%u sec=%d sess=%d\r\n", (unsigned)cmd,
          (unsigned)frame_len, (int)sec_enabled(), (int)session_alive());
-  if (sec_enabled() && cmd != CMD_AUTHENTICATE && frame_len >= 31u) {
-    if (!session_alive()) {
+  if (sec_enabled() && cmd != CMD_AUTHENTICATE) {
+    if (frame_len >= 31u) {
+      if (!session_alive()) {
+        send_auth_required_response(connection, frame[1]);
+        return;
+      }
+      if (!decrypt_encrypted_payload(cmd, &frame[2], (uint16_t)(frame_len - 2u), s_plain_buf, &plain_len)) {
+        uint8_t err[] = { 0x00u, frame[1], 0xFFu };
+        pipe_send(connection, err, sizeof(err));
+        return;
+      }
+      dispatch(connection, cmd, s_plain_buf, plain_len);
+      return;
+    }
+    /*
+     * Sub-31-byte frame while security is enabled. If a session is live, an
+     * unencrypted command must be rejected (matches the reference's
+     * "Unencrypted command received when encryption is enabled",
+     * communication.cpp:502-507) so a plaintext reboot/DFU/etc. cannot slip
+     * past the auth+replay checks mid-session. Firmware-version stays always
+     * plaintext-readable (exempted at communication.cpp:488); authenticate is
+     * already excluded above. When no session is live, fall through to
+     * dispatch()'s auth gate, preserving today's behaviour exactly
+     * (fw-version + the config-rewrite path stay reachable).
+     */
+    if (session_alive() && cmd != CMD_FIRMWARE_VERSION) {
       send_auth_required_response(connection, frame[1]);
       return;
     }
-    if (!decrypt_encrypted_payload(cmd, &frame[2], (uint16_t)(frame_len - 2u), s_plain_buf, &plain_len)) {
-      uint8_t err[] = { 0x00u, frame[1], 0xFFu };
-      pipe_send(connection, err, sizeof(err));
-      return;
-    }
-    dispatch(connection, cmd, s_plain_buf, plain_len);
-    return;
   }
   dispatch(connection, cmd, &frame[2], (uint16_t)(frame_len - 2u));
 }
