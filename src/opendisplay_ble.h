@@ -25,6 +25,13 @@ void opendisplay_ble_copy_msd_bytes(uint8_t out[16]);
 void opendisplay_ble_update_msd(bool refresh_advertising);
 float opendisplay_ble_get_chip_temperature(void);
 
+/* Sets MSD status bit2 (connectionRequested). Mirrors the reference nRF52840
+ * flag (main.h:127, display_service.cpp:1296): a device-side request for the
+ * host to connect. No producer exists yet on this branch (nor in the reference,
+ * where it is reserved-for-future and stays 0); this is the hook a future
+ * feature / sibling branch wires. */
+void opendisplay_ble_set_connection_requested(bool requested);
+
 bool opendisplay_ble_pipe_notify(const uint8_t *data, uint16_t len);
 bool opendisplay_ble_pipe_notify_enabled(void);
 void opendisplay_ble_pipe_on_write(const uint8_t *data, uint16_t len, bool write_cmd);
