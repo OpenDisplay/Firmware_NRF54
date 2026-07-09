@@ -33,15 +33,32 @@
 #define MSD_PAYLOAD_LEN        16u
 #define OD_NAME_PREFIX         "OD"
 #ifndef BUILD_VERSION
-#define BUILD_VERSION          ""
+#define BUILD_VERSION
 #endif
+#define OD_STRINGIFY(x) #x
+#define OD_XSTRINGIFY(x) OD_STRINGIFY(x)
+#define BUILD_VERSION_STRING OD_XSTRINGIFY(BUILD_VERSION)
 #ifndef OD_APP_VERSION
 #define OD_APP_VERSION         0x0100u
 #endif
 
+static const char *fw_build_version_string(void)
+{
+	const char *v = BUILD_VERSION_STRING;
+
+	if (v[0] == '\0') {
+		return NULL;
+	}
+	return v;
+}
+
 static uint8_t fw_major_from_build_version(void)
 {
-	const char *v = BUILD_VERSION;
+	const char *v = fw_build_version_string();
+
+	if (v == NULL) {
+		return 0;
+	}
 
 	while (*v == ' ' || *v == 'v' || *v == 'V') {
 		v++;
@@ -63,7 +80,11 @@ static uint8_t fw_major_from_build_version(void)
 
 static uint8_t fw_minor_from_build_version(void)
 {
-	const char *v = BUILD_VERSION;
+	const char *v = fw_build_version_string();
+
+	if (v == NULL) {
+		return 0;
+	}
 
 	while (*v == ' ' || *v == 'v' || *v == 'V') {
 		v++;
@@ -371,7 +392,7 @@ const struct GlobalConfig *opendisplay_get_global_config(void)
 
 uint16_t opendisplay_ble_get_app_version(void)
 {
-	if (BUILD_VERSION[0] != '\0') {
+	if (fw_build_version_string() != NULL) {
 		return ((uint16_t)fw_major_from_build_version() << 8) |
 		       fw_minor_from_build_version();
 	}
