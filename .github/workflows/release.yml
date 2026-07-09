@@ -1,0 +1,53 @@
+name: Release Firmware
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    name: Build & Upload Firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio-release
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Build & Package nRF54L15 Firmware
+        run: |
+          export PLATFORMIO_BUILD_FLAGS="-D BUILD_VERSION=\"${{ github.ref_name }}\" -D SHA=$GITHUB_SHA"
+          pio run --environment seeed-xiao-nrf54l15
+          mkdir -p firmware_output
+          cp .pio/build/seeed-xiao-nrf54l15/firmware.hex \
+            "firmware_output/nrf54l15-${{ github.event.release.tag_name }}.hex"
+
+      - name: Build & Package nRF54LM20A Firmware
+        run: |
+          export PLATFORMIO_BUILD_FLAGS="-D BUILD_VERSION=\"${{ github.ref_name }}\" -D SHA=$GITHUB_SHA"
+          pio run --environment seeed-xiao-nrf54lm20a
+          cp .pio/build/seeed-xiao-nrf54lm20a/firmware.hex \
+            "firmware_output/nrf54lm20a-${{ github.event.release.tag_name }}.hex"
+
+      - name: Upload Release Assets
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: firmware_output/*
+          tag: ${{ github.ref }}
+          file_glob: true
+          overwrite: true

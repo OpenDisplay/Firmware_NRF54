@@ -32,9 +32,63 @@
 #define OPENDISPLAY_COMPANY_ID 0x2446u
 #define MSD_PAYLOAD_LEN        16u
 #define OD_NAME_PREFIX         "OD"
+#ifndef BUILD_VERSION
+#define BUILD_VERSION          ""
+#endif
 #ifndef OD_APP_VERSION
 #define OD_APP_VERSION         0x0100u
 #endif
+
+static uint8_t fw_major_from_build_version(void)
+{
+	const char *v = BUILD_VERSION;
+
+	while (*v == ' ' || *v == 'v' || *v == 'V') {
+		v++;
+	}
+	if (*v < '0' || *v > '9') {
+		return 0;
+	}
+	unsigned maj = 0U;
+
+	while (*v >= '0' && *v <= '9') {
+		maj = maj * 10U + (unsigned)(*v - '0');
+		v++;
+	}
+	if (maj > 255U) {
+		maj = 255U;
+	}
+	return (uint8_t)maj;
+}
+
+static uint8_t fw_minor_from_build_version(void)
+{
+	const char *v = BUILD_VERSION;
+
+	while (*v == ' ' || *v == 'v' || *v == 'V') {
+		v++;
+	}
+	while (*v >= '0' && *v <= '9') {
+		v++;
+	}
+	if (*v != '.') {
+		return 0;
+	}
+	v++;
+	if (*v < '0' || *v > '9') {
+		return 0;
+	}
+	unsigned min = 0U;
+
+	while (*v >= '0' && *v <= '9') {
+		min = min * 10U + (unsigned)(*v - '0');
+		v++;
+	}
+	if (min > 255U) {
+		min = 255U;
+	}
+	return (uint8_t)min;
+}
 
 /* BLE adv interval units are 0.625 ms (same as nRF52840 Firmware). Matches the
  * reference nRF window (NRF_ADV_INTERVAL_MIN/MAX, ble_init.cpp:48-49): a 160 ms
@@ -317,6 +371,10 @@ const struct GlobalConfig *opendisplay_get_global_config(void)
 
 uint16_t opendisplay_ble_get_app_version(void)
 {
+	if (BUILD_VERSION[0] != '\0') {
+		return ((uint16_t)fw_major_from_build_version() << 8) |
+		       fw_minor_from_build_version();
+	}
 	return OD_APP_VERSION;
 }
 

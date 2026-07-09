@@ -17,6 +17,22 @@
 #ifndef OPENDISPLAY_BUILD_ID
 #define OPENDISPLAY_BUILD_ID "nrf54"
 #endif
+#ifndef SHA
+#define SHA
+#endif
+#define OD_STRINGIFY(x) #x
+#define OD_XSTRINGIFY(x) OD_STRINGIFY(x)
+#define SHA_STRING OD_XSTRINGIFY(SHA)
+
+static const char *fw_sha_string(void)
+{
+	const char *sha = SHA_STRING;
+
+	if (sha[0] != '\0') {
+		return sha;
+	}
+	return OPENDISPLAY_BUILD_ID;
+}
 
 typedef struct {
   bool active;
@@ -574,7 +590,7 @@ static void reply_firmware_version(uint8_t connection)
   uint16_t ver = opendisplay_ble_get_app_version();
   uint8_t major = (uint8_t)((ver >> 8) & 0xFFu);
   uint8_t minor = (uint8_t)(ver & 0xFFu);
-  const char *sha = OPENDISPLAY_BUILD_ID;
+  const char *sha = fw_sha_string();
   uint8_t sha_len = (uint8_t)strlen(sha);
   uint16_t o = 0;
 
