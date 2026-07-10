@@ -16,32 +16,34 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - uses: actions/cache@v4
+      - name: Cache NCS SDK
+        id: cache-ncs
+        uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/pip
-            ~/.platformio/.cache
-          key: ${{ runner.os }}-pio-release
+            ~/ncs/v3.3.1
+            ~/ncs/toolchains
+          key: ncs-v3.3.1-${{ runner.os }}
 
-      - name: Install PlatformIO
+      - name: Install NCS SDK and toolchain
+        if: steps.cache-ncs.outputs.cache-hit != 'true'
         run: |
-          python -m pip install --upgrade pip
-          pip install platformio
+          pip install --upgrade pip nrfutil
+          nrfutil install sdk-manager
+          nrfutil sdk-manager install --ncs-version v3.3.1
 
-      - name: Build & Package nRF54L15 Firmware
+      - name: Build nRF54L15 Firmware
+        working-directory: Firmware_NRF54
+        env:
+          BUILD_VERSION: ${{ github.event.release.tag_name }}
+          SHA: ${{ github.sha }}
+        run: ./build.sh
+
+      - name: Package hex
         run: |
-          export PLATFORMIO_BUILD_FLAGS="-D BUILD_VERSION=${{ github.ref_name }} -D SHA=$GITHUB_SHA"
-          pio run --environment seeed-xiao-nrf54l15
           mkdir -p firmware_output
-          cp .pio/build/seeed-xiao-nrf54l15/firmware.hex \
+          cp Firmware_NRF54/build/merged.hex \
             "firmware_output/nrf54l15-${{ github.event.release.tag_name }}.hex"
-
-      - name: Build & Package nRF54LM20A Firmware
-        run: |
-          export PLATFORMIO_BUILD_FLAGS="-D BUILD_VERSION=${{ github.ref_name }} -D SHA=$GITHUB_SHA"
-          pio run --environment seeed-xiao-nrf54lm20a
-          cp .pio/build/seeed-xiao-nrf54lm20a/firmware.hex \
-            "firmware_output/nrf54lm20a-${{ github.event.release.tag_name }}.hex"
 
       - name: Upload Release Assets
         uses: svenstaro/upload-release-action@v2

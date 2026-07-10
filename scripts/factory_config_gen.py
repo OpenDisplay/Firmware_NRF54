@@ -1,63 +1,20 @@
 #!/usr/bin/env python3
-"""PlatformIO pre-build: optional factory config embed or one-shot clear build."""
+"""Generate factory_config_data.c before compile (PlatformIO pre-build or CMake)."""
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
 
-Import("env")
-
-PROJECT_DIR = Path(env["PROJECT_DIR"])
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = SCRIPT_DIR.parent
 GEN_DIR = PROJECT_DIR / "src" / "generated"
 GEN_C = GEN_DIR / "factory_config_data.c"
 TOOL_DIR = PROJECT_DIR / "tools"
 sys.path.insert(0, str(TOOL_DIR))
 from config_packet import MAX_PACKET, parse_hex_bytes, validate_packet  # noqa: E402
-
-SRC_DIR = PROJECT_DIR / "src"
-SYMLINKS = {
-    SRC_DIR / "bb_epaper": PROJECT_DIR / "third_party" / "bb_epaper" / "src",
-    SRC_DIR / "uzlib": PROJECT_DIR / "third_party" / "uzlib" / "src",
-}
-
-
-def ensure_src_symlinks() -> None:
-    """PlatformIO compiles src/ only; third_party must be linked into src/."""
-    for link, target in SYMLINKS.items():
-        if link.is_symlink() and link.resolve() == target.resolve():
-            continue
-        if link.exists() or link.is_symlink():
-            link.unlink()
-        link.symlink_to(os.path.relpath(target, link.parent))
-
-
-def read_hex_from_env() -> str:
-    for key in ("OPENDISPLAY_FACTORY_CONFIG_HEX", "PLATFORMIO_FACTORY_CONFIG_HEX"):
-        val = os.environ.get(key, "").strip()
-        if val:
-            return val
-    try:
-        return env.GetProjectOption("custom_factory_config_hex", "").strip()
-    except Exception:
-        return ""
-
-
-def clear_requested() -> bool:
-    for key in ("OPENDISPLAY_FACTORY_CLEAR_CONFIG", "PLATFORMIO_FACTORY_CLEAR_CONFIG"):
-        val = os.environ.get(key, "").strip().lower()
-        if val in ("1", "true", "yes", "on"):
-            return True
-    try:
-        return env.GetProjectOption("custom_factory_clear_config", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-    except Exception:
-        return False
 
 
 def format_byte_array(data: bytes) -> str:
@@ -95,24 +52,51 @@ const factory_flash_cfg_t g_factory_embed = {{
     GEN_C.write_text(body, encoding="utf-8")
 
 
-def main() -> None:
-    ensure_src_symlinks()
-    if clear_requested():
-        env.Append(CPPDEFINES=[("FACTORY_CLEAR_CONFIG_ON_BOOT", "1")])
+def generate(hex_str: str = "", clear: bool = False) -> tuple[bool, bool]:
+    """Returns (has_embed, clear_on_boot)."""
+    if clear:
         write_stub()
-        print("factory_config_gen: FACTORY_CLEAR_CONFIG_ON_BOOT enabled", file=sys.stderr)
-        return
+        return False, True
 
-    hex_str = read_hex_from_env()
     if not hex_str:
         write_stub()
-        return
+        return False, False
 
     packet = parse_hex_bytes(hex_str)
     validate_packet(packet)
     write_embed(packet)
-    env.Append(CPPDEFINES=[("FACTORY_HAS_EMBED", "1")])
-    print(f"factory_config_gen: embedded {len(packet)} byte config packet", file=sys.stderr)
+    return True, False
 
 
-main()
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate factory_config_data.c")
+    parser.add_argument("--hex", dest="hex_str", default="", help="Config packet hex")
+    parser.add_argument("--clear", action="store_true", help="FACTORY_CLEAR_CONFIG_ON_BOOT build")
+    args = parser.parse_args()
+
+    hex_str = args.hex_str.strip()
+    if not hex_str:
+        for key in ("OPENDISPLAY_FACTORY_CONFIG_HEX", "FACTORY_CONFIG_HEX"):
+            val = os.environ.get(key, "").strip()
+            if val:
+                hex_str = val
+                break
+
+    clear = args.clear
+    if not clear:
+        for key in ("OPENDISPLAY_FACTORY_CLEAR_CONFIG",):
+            val = os.environ.get(key, "").strip().lower()
+            if val in ("1", "true", "yes", "on"):
+                clear = True
+                break
+
+    has_embed, clear_on_boot = generate(hex_str, clear)
+    if clear_on_boot:
+        print("factory_config_gen: FACTORY_CLEAR_CONFIG_ON_BOOT", file=sys.stderr)
+    elif has_embed:
+        print(f"factory_config_gen: embedded config", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

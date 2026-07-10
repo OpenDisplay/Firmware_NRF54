@@ -1,6 +1,7 @@
 #include "opendisplay_config_parser.h"
 #include "opendisplay_constants.h"
 #include "opendisplay_config_storage.h"
+#include "opendisplay_device_flags.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -202,6 +203,9 @@ bool parseConfigBytes(uint8_t* configData, uint32_t configLen, struct GlobalConf
                 if (offset + sizeof(struct SystemConfig) <= configLen - 2) {
                     memcpy(&globalConfig->system_config, &configData[offset], sizeof(struct SystemConfig));
                     offset += sizeof(struct SystemConfig);
+                    if ((globalConfig->system_config.device_flags & DEVICE_FLAG_CHANNEL_SOUNDING) != 0u) {
+                        printf("system_config: CHANNEL_SOUNDING enabled\r\n");
+                    }
                     if (offset > configLen) {
                         printf("Offset overflow after system_config\r\n");
                         globalConfig->loaded = false;

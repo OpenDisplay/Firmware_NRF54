@@ -1,23 +1,89 @@
 cmake_minimum_required(VERSION 3.13.1)
 
-set(BB_EPAPER_DIR ${CMAKE_CURRENT_LIST_DIR}/../src/bb_epaper)
-set(UZLIB_DIR ${CMAKE_CURRENT_LIST_DIR}/../src/uzlib)
-set(SRC_DIR ${CMAKE_CURRENT_LIST_DIR}/../src)
+set(PROJECT_ROOT ${CMAKE_CURRENT_LIST_DIR}/..)
+set(THIRD_PARTY_DIR ${PROJECT_ROOT}/third_party)
+set(SRC_DIR ${PROJECT_ROOT}/src)
+set(GEN_DIR ${SRC_DIR}/generated)
+
+list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/prj_ncs.conf)
+list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/prj_cs.conf)
 
 if(BOARD MATCHES ".*lm20.*")
   list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/prj_lm20_extra.conf)
 endif()
 
+if(DEFINED ENV{PROFILE} AND "$ENV{PROFILE}" STREQUAL "uart")
+  list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/prj_uart.conf)
+elseif(OD_UART_DEBUG OR (DEFINED PROFILE AND PROFILE STREQUAL "uart"))
+  list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/prj_uart.conf)
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(opendisplay_nrf54)
 
-target_include_directories(app PRIVATE
-  ${SRC_DIR}
-  ${BB_EPAPER_DIR}
-  ${UZLIB_DIR}
+set(FACTORY_GEN_SCRIPT ${PROJECT_ROOT}/scripts/factory_config_gen.py)
+set(FACTORY_GEN_STAMP ${GEN_DIR}/.factory_gen_stamp)
+
+if(NOT DEFINED FACTORY_CONFIG_HEX)
+  set(FACTORY_CONFIG_HEX "")
+endif()
+if(NOT DEFINED FACTORY_CLEAR_CONFIG_ON_BOOT)
+  set(FACTORY_CLEAR_CONFIG_ON_BOOT OFF)
+endif()
+
+set(FACTORY_GEN_ARGS "")
+if(FACTORY_CONFIG_HEX)
+  list(APPEND FACTORY_GEN_ARGS --hex=${FACTORY_CONFIG_HEX})
+endif()
+if(FACTORY_CLEAR_CONFIG_ON_BOOT)
+  list(APPEND FACTORY_GEN_ARGS --clear)
+endif()
+
+add_custom_command(
+  OUTPUT ${FACTORY_GEN_STAMP}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}
+  COMMAND ${Python3_EXECUTABLE} ${FACTORY_GEN_SCRIPT} ${FACTORY_GEN_ARGS}
+  COMMAND ${CMAKE_COMMAND} -E touch ${FACTORY_GEN_STAMP}
+  DEPENDS ${FACTORY_GEN_SCRIPT} ${PROJECT_ROOT}/tools/config_packet.py
+  WORKING_DIRECTORY ${PROJECT_ROOT}
+  COMMENT "Generating factory_config_data.c"
+  VERBATIM
 )
 
-target_compile_definitions(app PRIVATE TARGET_NRF54)
+add_custom_target(factory_config_gen DEPENDS ${FACTORY_GEN_STAMP})
+
+target_include_directories(app PRIVATE
+  ${SRC_DIR}
+  ${THIRD_PARTY_DIR}/bb_epaper/src
+  ${THIRD_PARTY_DIR}/uzlib/src
+  ${GEN_DIR}
+)
+
+target_compile_definitions(app PRIVATE
+  TARGET_NRF54
+  OD_APP_VERSION=0x0100
+  OPENDISPLAY_BUILD_ID=\"nrf54\"
+  OPENDISPLAY_ZLIB_USE_HEAP_WINDOW=0
+)
+
+if(BOARD MATCHES ".*lm20.*")
+  target_compile_definitions(app PRIVATE NRF54_BOARD_LM20)
+else()
+  target_compile_definitions(app PRIVATE NRF54_BOARD_L15)
+endif()
+
+if(DEFINED BUILD_VERSION)
+  target_compile_definitions(app PRIVATE BUILD_VERSION=\"${BUILD_VERSION}\")
+endif()
+if(DEFINED GIT_SHA)
+  target_compile_definitions(app PRIVATE SHA=\"${GIT_SHA}\")
+endif()
+if(FACTORY_CONFIG_HEX)
+  target_compile_definitions(app PRIVATE FACTORY_HAS_EMBED=1)
+endif()
+if(FACTORY_CLEAR_CONFIG_ON_BOOT)
+  target_compile_definitions(app PRIVATE FACTORY_CLEAR_CONFIG_ON_BOOT=1)
+endif()
 
 target_sources(app PRIVATE
   ${SRC_DIR}/main.c
@@ -41,7 +107,13 @@ target_sources(app PRIVATE
   ${SRC_DIR}/opendisplay_touch.c
   ${SRC_DIR}/opendisplay_buzzer.c
   ${SRC_DIR}/opendisplay_pipe.c
+  ${SRC_DIR}/opendisplay_cs.c
+  ${SRC_DIR}/factory_config.c
+  ${GEN_DIR}/factory_config_data.c
   ${SRC_DIR}/qr/qrcode.c
-  ${BB_EPAPER_DIR}/bb_epaper.cpp
-  ${BB_EPAPER_DIR}/Group5.cpp
-  ${UZLIB_DIR}/od_zlib_stream.c)
+  ${THIRD_PARTY_DIR}/bb_epaper/src/bb_epaper.cpp
+  ${THIRD_PARTY_DIR}/bb_epaper/src/Group5.cpp
+  ${THIRD_PARTY_DIR}/uzlib/src/od_zlib_stream.c
+)
+
+add_dependencies(app factory_config_gen)

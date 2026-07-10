@@ -1,6 +1,7 @@
 #include "opendisplay_ble.h"
 #include "opendisplay_config_parser.h"
 #include "opendisplay_config_storage.h"
+#include "opendisplay_cs.h"
 #include "opendisplay_constants.h"
 #include "opendisplay_display.h"
 #include "opendisplay_button.h"
@@ -141,11 +142,32 @@ static struct bt_le_adv_param s_adv_param = BT_LE_ADV_PARAM_INIT(
 	OD_ADV_INTERVAL_MIN, OD_ADV_INTERVAL_MAX, NULL);
 
 static struct k_work_delayable s_adv_restart_work;
+static struct k_work s_boot_display_work;
+static struct k_work_q s_display_work_q;
+static K_THREAD_STACK_DEFINE(s_display_wq_stack, 8192);
+static bool s_display_wq_started;
 static bool s_adv_work_msd_publish;
 
 static int start_advertising(void);
 static bool publish_msd_to_advertising(void);
 static void apply_tx_power(uint8_t handle_type, uint16_t handle);
+
+static void boot_display_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	opendisplay_display_boot_apply();
+}
+
+static void schedule_boot_display_apply(void)
+{
+	if (!s_display_wq_started) {
+		k_work_queue_init(&s_display_work_q);
+		k_work_queue_start(&s_display_work_q, s_display_wq_stack,
+				   K_THREAD_STACK_SIZEOF(s_display_wq_stack), 14, NULL);
+		s_display_wq_started = true;
+	}
+	(void)k_work_submit_to_queue(&s_display_work_q, &s_boot_display_work);
+}
 
 static void adv_work_handler(struct k_work *work)
 {
@@ -195,11 +217,9 @@ static void chip_id_hex6(char out[7])
 static float s_chip_temperature = -999.0f;
 
 /*
- * The nrf temp driver's sample_fetch blocks on the TEMP interrupt with
- * K_FOREVER. On this nRF54L15 port that interrupt stops arriving once the
- * BLE controller is running, permanently hanging the calling thread (main
- * loop / system workqueue). Read the die temperature once before bt_enable()
- * and reuse the cached value in the MSD payload.
+ * With CONFIG_TEMP_NRF5_MPSL (SoftDevice builds) sample_fetch uses
+ * mpsl_temperature_get() and is safe after bt_enable(). Legacy Zephyr temp
+ * drivers block on DATARDY IRQ; keep this call after the stack is up.
  */
 static void read_chip_temperature_once(void)
 {
@@ -297,10 +317,26 @@ static const struct bt_data ad[] = {
 	BT_DATA(BT_DATA_MANUFACTURER_DATA, msd_payload, MSD_PAYLOAD_LEN),
 };
 
-static struct bt_data sd[] = {
-	BT_DATA(BT_DATA_NAME_COMPLETE, s_dev_name, 0),
-	BT_DATA_BYTES(BT_DATA_UUID16_ALL, 0x46, 0x24),
-};
+static struct bt_data sd_name = BT_DATA(BT_DATA_NAME_COMPLETE, s_dev_name, 0);
+static const struct bt_data sd_od_uuid = BT_DATA_BYTES(BT_DATA_UUID16_ALL, 0x46, 0x24);
+static struct bt_data sd_cs_uuid;
+static struct bt_data sd_buf[3];
+
+static unsigned sd_prepare(void)
+{
+	unsigned count = 2u;
+	unsigned cs_extra = 0u;
+
+	sd_name.data_len = (uint8_t)strlen(s_dev_name);
+	sd_buf[0] = sd_name;
+	sd_buf[1] = sd_od_uuid;
+	opendisplay_cs_fill_scan_response(&s_od_global_config, &sd_cs_uuid, 1u, &cs_extra);
+	if (cs_extra != 0u) {
+		sd_buf[2] = sd_cs_uuid;
+		count = 3u;
+	}
+	return count;
+}
 
 static bool publish_msd_to_advertising(void)
 {
@@ -315,7 +351,9 @@ static bool publish_msd_to_advertising(void)
 	log_msd("publish");
 
 	if (s_adv_active) {
-		if (bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd)) != 0) {
+		unsigned sd_count = sd_prepare();
+
+		if (bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd_buf, sd_count) != 0) {
 			return start_advertising() == 0;
 		}
 		return true;
@@ -347,6 +385,9 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	s_conn = bt_conn_ref(conn);
 	s_adv_active = false;
 	s_reboot_flag = 0;
+	if (opendisplay_cs_config_enabled(&s_od_global_config)) {
+		opendisplay_cs_on_connected(conn);
+	}
 #if defined(CONFIG_BT_HCI_VS)
 	{
 		uint16_t conn_handle = 0;
@@ -362,6 +403,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	ARG_UNUSED(conn);
 	printf("[OD] disconnected reason=%u\r\n", (unsigned)reason);
+	opendisplay_cs_on_disconnected(conn);
 	opendisplay_pipe_on_connection_closed();
 	if (s_conn != NULL) {
 		bt_conn_unref(s_conn);
@@ -517,13 +559,13 @@ static int start_advertising(void)
 
 	chip_id_hex6(hex);
 	snprintf(s_dev_name, sizeof(s_dev_name), "%s%s", OD_NAME_PREFIX, hex);
-	sd[0].data_len = strlen(s_dev_name);
+	unsigned sd_count = sd_prepare();
 	/* MSD payload is updated only via opendisplay_ble_update_msd(), not on every
 	 * adv stop/start (disconnect restart, boost end, retry fallback). */
 
 	apply_adv_interval();
 	(void)bt_le_adv_stop();
-	err = bt_le_adv_start(&s_adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	err = bt_le_adv_start(&s_adv_param, ad, ARRAY_SIZE(ad), sd_buf, sd_count);
 	s_adv_active = (err == 0);
 	if (err != 0) {
 		printf("[OD] adv start failed: %d (will retry)\r\n", err);
@@ -569,6 +611,9 @@ void opendisplay_ble_reload_config_from_nvm(void)
 	flash_powerdown_from_config();
 	/* Re-apply advertising TX power in case the new config changed it. */
 	apply_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_ADV, 0);
+	if (s_conn == NULL) {
+		schedule_adv_restart(0);
+	}
 }
 
 void opendisplay_ble_restart_advertising(void)
@@ -626,15 +671,13 @@ void opendisplay_ble_init(void)
 	}
 	flash_powerdown_from_config();
 
-	read_chip_temperature_once();
-
 	opendisplay_sensor_bq27220_init();
 	opendisplay_sensor_sht40_init();
 
 	opendisplay_led_init();
 	opendisplay_buzzer_init();
-	opendisplay_display_boot_apply();
 
+	printf("[OD] enabling Bluetooth\r\n");
 	err = bt_enable(NULL);
 	if (err != 0) {
 		printf("[OD] bt_enable failed: %d\r\n", err);
@@ -643,14 +686,22 @@ void opendisplay_ble_init(void)
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		(void)settings_load();
 	}
+	read_chip_temperature_once();
 
 	opendisplay_button_init();
 	opendisplay_touch_init();
 	k_work_init_delayable(&s_adv_restart_work, adv_work_handler);
-	apply_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_ADV, 0);
+	k_work_init(&s_boot_display_work, boot_display_work_handler);
 	update_msd_payload();
-	(void)start_advertising();
+	err = start_advertising();
+	if (err != 0) {
+		printf("[OD] initial adv failed: %d (will retry)\r\n", err);
+		schedule_adv_restart(0);
+	} else {
+		apply_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_ADV, 0);
+	}
 	printf("[OD] BLE ready as %s\r\n", s_dev_name);
+	schedule_boot_display_apply();
 }
 
 void opendisplay_ble_process(void)
