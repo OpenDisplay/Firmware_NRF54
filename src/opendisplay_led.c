@@ -332,6 +332,7 @@ void opendisplay_led_init(void)
     if (led->led_3_b != GPIO_PIN_UNUSED) {
       nrf54_gpio_configure_output(led->led_3_b, (led->led_flags & LED_FLAG_INVERT_BLUE) != 0u);
     }
+    od_led_all_off(led);
   }
 }
 

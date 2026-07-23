@@ -18,6 +18,16 @@ elseif(OD_UART_DEBUG OR (DEFINED PROFILE AND PROFILE STREQUAL "uart"))
   list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/prj_uart.conf)
 endif()
 
+if(DEFINED ENV{PROFILE} AND "$ENV{PROFILE}" STREQUAL "quiet")
+  list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/prj_quiet.conf)
+  set(OD_LOW_POWER_QUIET ON)
+elseif(OD_LOW_POWER_QUIET OR (DEFINED PROFILE AND PROFILE STREQUAL "quiet"))
+  list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/prj_quiet.conf)
+  set(OD_LOW_POWER_QUIET ON)
+endif()
+
+list(APPEND BOARD_ROOT ${CMAKE_CURRENT_LIST_DIR}/..)
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(opendisplay_nrf54)
 
@@ -84,6 +94,9 @@ endif()
 if(FACTORY_CLEAR_CONFIG_ON_BOOT)
   target_compile_definitions(app PRIVATE FACTORY_CLEAR_CONFIG_ON_BOOT=1)
 endif()
+if(OD_LOW_POWER_QUIET)
+  target_compile_definitions(app PRIVATE OD_LOW_POWER_QUIET=1)
+endif()
 
 target_sources(app PRIVATE
   ${SRC_DIR}/main.c
@@ -96,6 +109,7 @@ target_sources(app PRIVATE
   ${SRC_DIR}/opendisplay_i2c.c
   ${SRC_DIR}/opendisplay_sensor_sht40.c
   ${SRC_DIR}/opendisplay_sensor_bq27220.c
+  ${SRC_DIR}/opendisplay_sensor_npm1300.c
   ${SRC_DIR}/opendisplay_button.c
   ${SRC_DIR}/opendisplay_config_parser.c
   ${SRC_DIR}/opendisplay_config_storage.c
@@ -107,6 +121,7 @@ target_sources(app PRIVATE
   ${SRC_DIR}/opendisplay_touch.c
   ${SRC_DIR}/opendisplay_buzzer.c
   ${SRC_DIR}/opendisplay_pipe.c
+  ${SRC_DIR}/opendisplay_pipe_write.cpp
   ${SRC_DIR}/opendisplay_cs.c
   ${SRC_DIR}/factory_config.c
   ${GEN_DIR}/factory_config_data.c

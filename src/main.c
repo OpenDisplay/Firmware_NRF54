@@ -9,7 +9,7 @@
 
 static void idle_delay_ms(uint32_t delay_ms)
 {
-	const uint32_t chunk_ms = 100u;
+	const uint32_t chunk_ms = 1000u;
 	uint32_t remaining = delay_ms;
 
 	while (remaining > 0u) {
@@ -36,9 +36,13 @@ int main(void)
 
 		if (opendisplay_ble_is_connected()) {
 			opendisplay_ble_process();
+#if !defined(OD_LOW_POWER_QUIET)
 			if ((ticks++ % 100u) == 0u) {
 				printf("OpenDisplay alive uptime=%u ms\r\n", k_uptime_get_32());
 			}
+#else
+			ticks++;
+#endif
 			k_msleep(10);
 			continue;
 		}
@@ -53,9 +57,13 @@ int main(void)
 			idle_delay_ms(500u);
 		}
 
+#if !defined(OD_LOW_POWER_QUIET)
 		if ((ticks++ % 10u) == 0u) {
 			printf("OpenDisplay alive uptime=%u ms\r\n", k_uptime_get_32());
 		}
+#else
+		ticks++;
+#endif
 	}
 	return 0;
 }

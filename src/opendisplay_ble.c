@@ -13,6 +13,7 @@
 #include "opendisplay_battery.h"
 #include "opendisplay_sensor_sht40.h"
 #include "opendisplay_sensor_bq27220.h"
+#include "opendisplay_sensor_npm1300.h"
 #include "board_nrf54.h"
 
 #include <stdio.h>
@@ -112,12 +113,12 @@ static uint8_t fw_minor_from_build_version(void)
 	return (uint8_t)min;
 }
 
-/* BLE adv interval units are 0.625 ms (same as nRF52840 Firmware). Matches the
- * reference nRF window (NRF_ADV_INTERVAL_MIN/MAX, ble_init.cpp:48-49): a 160 ms
- * floor for faster discovery up to a 1000 ms ceiling; the controller picks a
- * value within the window. */
-#define OD_ADV_INTERVAL_MIN       256u                   /* 160 ms */
-#define OD_ADV_INTERVAL_MAX       BT_GAP_ADV_SLOW_INT_MIN /* 1600 = 1000 ms (~1 adv/s) */
+/* Steady advertising: fixed ~1000 ms (SoftDevice often sticks to interval_min
+ * when given a window — the old 160–1000 ms range showed as continuous 160 ms).
+ * Matches Firmware_NRF APP_ADV_INTERVAL. Boost still 20–30 ms for 3 s after
+ * button/touch for faster rediscovery. */
+#define OD_ADV_INTERVAL_MIN       BT_GAP_ADV_SLOW_INT_MIN /* 1600 = 1000 ms */
+#define OD_ADV_INTERVAL_MAX       BT_GAP_ADV_SLOW_INT_MIN /* 1600 = 1000 ms */
 #define OD_ADV_BOOST_INTERVAL_MIN 32u   /* 20 ms */
 #define OD_ADV_BOOST_INTERVAL_MAX 48u   /* 30 ms */
 #define OD_ADV_BOOST_MS           3000u
@@ -247,6 +248,7 @@ static void update_msd_payload(void)
 	 * before packing the frame. All three are TTL-cached (30 s). */
 	opendisplay_sensor_sht40_poll();
 	opendisplay_sensor_bq27220_poll();
+	opendisplay_sensor_npm1300_poll();
 	battery_voltage_10mv = opendisplay_battery_get_10mv();
 
 	temp_encoded = (int16_t)((s_chip_temperature + 40.0f) * 2.0f);
@@ -277,11 +279,15 @@ static void update_msd_payload(void)
 
 static void log_msd(const char *tag)
 {
+#if defined(OD_LOW_POWER_QUIET)
+	ARG_UNUSED(tag);
+#else
 	printf("[OD] msd %s:", tag);
 	for (unsigned i = 0; i < MSD_PAYLOAD_LEN; i++) {
 		printf(" %02X", msd_payload[i]);
 	}
 	printf("\r\n");
+#endif
 }
 
 static ssize_t od_gatt_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -574,7 +580,8 @@ static int start_advertising(void)
 			memcpy(s_last_published_msd, msd_payload, MSD_PAYLOAD_LEN);
 			s_msd_published = true;
 		}
-		printf("[OD] advertising as %s (interval=%u ms)\r\n", s_dev_name,
+		printf("[OD] advertising as %s (interval=%u-%u ms)\r\n", s_dev_name,
+		       (unsigned)BT_GAP_ADV_INTERVAL_TO_MS(s_adv_param.interval_min),
 		       (unsigned)BT_GAP_ADV_INTERVAL_TO_MS(s_adv_param.interval_max));
 	}
 	return err;
@@ -672,6 +679,7 @@ void opendisplay_ble_init(void)
 	flash_powerdown_from_config();
 
 	opendisplay_sensor_bq27220_init();
+	opendisplay_sensor_npm1300_init();
 	opendisplay_sensor_sht40_init();
 
 	opendisplay_led_init();
@@ -729,7 +737,8 @@ void opendisplay_ble_schedule_dfu(void)
 
 void opendisplay_ble_schedule_deep_sleep(void)
 {
-	printf("[OD] deep sleep not implemented on nRF54 yet\r\n");
+	printf("[OD] deep sleep: nPM1300 hibernate if available\r\n");
+	opendisplay_sensor_npm1300_enter_hibernate();
 }
 
 bool opendisplay_ble_nfc_read(uint8_t *type_out, uint8_t *data_out, uint16_t *data_len_io,

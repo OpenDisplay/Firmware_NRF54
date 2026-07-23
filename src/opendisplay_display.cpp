@@ -441,6 +441,66 @@ extern "C" bool opendisplay_display_partial_active(void)
   return s_partial.active;
 }
 
+extern "C" bool opendisplay_display_dw_active(void)
+{
+  return s_active;
+}
+
+extern "C" uint32_t opendisplay_display_bytes_written(void)
+{
+  return s_written_bytes;
+}
+
+extern "C" uint32_t opendisplay_display_total_bytes(void)
+{
+  return s_total_bytes;
+}
+
+extern "C" uint32_t opendisplay_display_expected_dw_bytes(void)
+{
+  const struct DisplayConfig *d = display_cfg();
+
+  if (d == nullptr) {
+    return 0;
+  }
+  return opendisplay_color_direct_write_total_bytes(d->pixel_width, d->pixel_height, d->color_scheme);
+}
+
+extern "C" uint32_t opendisplay_display_displayed_etag(void)
+{
+  return s_displayed_etag;
+}
+
+extern "C" void opendisplay_display_clear_etag(void)
+{
+  s_displayed_etag = 0;
+}
+
+extern "C" void opendisplay_display_set_partial_new_etag(uint32_t new_etag)
+{
+  s_partial.new_etag = new_etag;
+}
+
+extern "C" uint32_t opendisplay_display_partial_bytes_written(void)
+{
+  return s_partial.bytes_written;
+}
+
+extern "C" uint32_t opendisplay_display_partial_expected(void)
+{
+  return s_partial.expected_stream_size;
+}
+
+extern "C" bool opendisplay_display_partial_compressed(void)
+{
+  return s_partial.compressed;
+}
+
+extern "C" uint32_t opendisplay_display_calc_plane_bytes(uint16_t width, uint16_t height)
+{
+  return calc_controller_plane_bytes(width, height);
+}
+
 extern "C" int opendisplay_display_partial_write_start(const uint8_t *payload, uint16_t payload_len,
                                                        uint8_t *err_code_out)
 {
@@ -978,5 +1038,114 @@ extern "C" int opendisplay_display_direct_write_end_refresh(const uint8_t *paylo
   }
   /* See note above: re-probe touch after the full-refresh path too. */
   opendisplay_touch_resume_after_refresh();
+  return 0;
+}
+
+extern "C" int opendisplay_display_pipe_full_start(bool compressed, uint32_t total_size)
+{
+  uint8_t size_le[4];
+
+  size_le[0] = (uint8_t)(total_size & 0xFFu);
+  size_le[1] = (uint8_t)((total_size >> 8) & 0xFFu);
+  size_le[2] = (uint8_t)((total_size >> 16) & 0xFFu);
+  size_le[3] = (uint8_t)((total_size >> 24) & 0xFFu);
+  if (compressed) {
+    return opendisplay_display_direct_write_start(size_le, 4u);
+  }
+  return opendisplay_display_direct_write_start(nullptr, 0u);
+}
+
+extern "C" int opendisplay_display_pipe_partial_arm(uint8_t flags, uint32_t old_etag, uint16_t x,
+                                                    uint16_t y, uint16_t w, uint16_t h,
+                                                    uint32_t total_size, uint8_t *err_code_out)
+{
+  const struct DisplayConfig *d = display_cfg();
+  uint32_t plane_bytes;
+
+  if (err_code_out != nullptr) {
+    *err_code_out = OD_ERR_PIPE_START_BAD_HEADER;
+  }
+  if (s_active) {
+    opendisplay_display_abort();
+  }
+  if (s_partial.active) {
+    partial_cleanup();
+  }
+  if (d == nullptr) {
+    return -1;
+  }
+  if ((flags & ~PARTIAL_ALLOWED_FLAGS) != 0u) {
+    if (err_code_out != nullptr) {
+      *err_code_out = OD_ERR_PIPE_START_UNKNOWN_FLAG;
+    }
+    return -1;
+  }
+  if (d->partial_update_support == 0u
+      || opendisplay_color_bits_per_pixel(d->color_scheme) != 1) {
+    s_displayed_etag = 0;
+    if (err_code_out != nullptr) {
+      *err_code_out = OD_ERR_PIPE_START_PARTIAL_UNSUPPORTED;
+    }
+    return -1;
+  }
+  if (old_etag == 0u || old_etag != s_displayed_etag) {
+    s_displayed_etag = 0;
+    if (err_code_out != nullptr) {
+      *err_code_out = OD_ERR_PIPE_START_ETAG_MISMATCH;
+    }
+    return -1;
+  }
+  if (w == 0u || h == 0u || (uint32_t)x + w > d->pixel_width || (uint32_t)y + h > d->pixel_height
+      || (x & 7u) != 0u || (w & 7u) != 0u) {
+    s_displayed_etag = 0;
+    if (err_code_out != nullptr) {
+      *err_code_out = OD_ERR_PIPE_START_RECT_INVALID;
+    }
+    return -1;
+  }
+  plane_bytes = calc_controller_plane_bytes(w, h);
+  if (plane_bytes == 0u || total_size != plane_bytes * 2u) {
+    s_displayed_etag = 0;
+    if (err_code_out != nullptr) {
+      *err_code_out = OD_ERR_PIPE_START_SIZE_MISMATCH;
+    }
+    return -1;
+  }
+  if ((flags & PARTIAL_FLAG_COMPRESSED) != 0u
+      && (d->transmission_modes & TRANSMISSION_MODE_STREAMING_DECOMPRESSION) == 0u) {
+    s_displayed_etag = 0;
+    if (err_code_out != nullptr) {
+      *err_code_out = OD_ERR_PIPE_START_PARTIAL_UNSUPPORTED;
+    }
+    return -1;
+  }
+
+  memset(&s_partial, 0, sizeof(s_partial));
+  s_partial.active = true;
+  s_partial.compressed = (flags & PARTIAL_FLAG_COMPRESSED) != 0u;
+  s_partial.flags = flags;
+  s_partial.new_etag = 0;
+  s_partial.x = x;
+  s_partial.y = y;
+  s_partial.width = w;
+  s_partial.height = h;
+  s_partial.expected_stream_size = total_size;
+  s_partial.plane_size = plane_bytes;
+  s_partial.current_plane = 0xFFu;
+  return 0;
+}
+
+extern "C" int opendisplay_display_pipe_partial_prepare(void)
+{
+  if (!s_partial.active) {
+    return -1;
+  }
+  if (!partial_prepare_panel_ram()) {
+    partial_cleanup();
+    return -1;
+  }
+  if (s_partial.compressed) {
+    od_zlib_stream_reset(s_partial.expected_stream_size);
+  }
   return 0;
 }

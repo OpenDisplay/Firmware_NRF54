@@ -8,6 +8,7 @@
 #include "opendisplay_protocol.h"
 #include "opendisplay_config_parser.h"
 #include "opendisplay_structs.h"
+#include "opendisplay_pipe_write.h"
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/drivers/hwinfo.h>
@@ -79,7 +80,7 @@ struct od_pipe_msg {
   uint8_t write_cmd;
   uint8_t data[OD_PIPE_MSG_DATA_MAX];
 };
-K_MSGQ_DEFINE(s_pipe_msgq, sizeof(struct od_pipe_msg), 8, 4);
+K_MSGQ_DEFINE(s_pipe_msgq, sizeof(struct od_pipe_msg), 40, 4);
 static atomic_t s_conn_gen;
 static atomic_t s_close_pending;
 
@@ -730,6 +731,7 @@ static void handle_partial_write_start(uint8_t connection, const uint8_t *payloa
   uint8_t err[] = { 0xFFu, 0x76u, OD_ERR_PARTIAL_STREAM, 0x00u };
   uint8_t err_code = OD_ERR_PARTIAL_STREAM;
 
+  opendisplay_pipe_write_reset();
   if (opendisplay_display_partial_write_start(payload, payload_len, &err_code) == 0) {
     pipe_send(connection, ok, sizeof(ok));
   } else {
@@ -743,6 +745,7 @@ static void handle_direct_write_start(uint8_t connection, const uint8_t *payload
   uint8_t ok[] = { 0x00u, 0x70u };
   uint8_t err[] = { 0xFFu, 0x70u };
   printf("[OD] pipe 0070 recv len=%u (epd init next)\r\n", (unsigned)payload_len);
+  opendisplay_pipe_write_reset();
   if (opendisplay_display_direct_write_start(payload, payload_len) == 0) {
     pipe_send(connection, ok, sizeof(ok));
   } else {
@@ -1313,6 +1316,15 @@ static void dispatch(uint8_t connection, uint16_t cmd, const uint8_t *payload, u
     case CMD_PARTIAL_WRITE_START:
       handle_partial_write_start(connection, payload, payload_len);
       break;
+    case CMD_PIPE_WRITE_START:
+      opendisplay_pipe_write_start(connection, payload, payload_len, pipe_send);
+      break;
+    case CMD_PIPE_WRITE_DATA:
+      opendisplay_pipe_write_data(connection, payload, payload_len, pipe_send);
+      break;
+    case CMD_PIPE_WRITE_END:
+      opendisplay_pipe_write_end(connection, payload, payload_len, pipe_send);
+      break;
     default:
       printf("[OD] unknown cmd 0x%04X\r\n", (unsigned)cmd);
       break;
@@ -1337,8 +1349,10 @@ static void on_pipe_write(uint8_t connection, const uint8_t *data, uint16_t len,
   }
 
   cmd = (uint16_t)(((uint16_t)frame[0] << 8) | frame[1]);
-  printf("[OD] rx cmd=0x%04X len=%u sec=%d sess=%d\r\n", (unsigned)cmd,
-         (unsigned)frame_len, (int)sec_enabled(), (int)session_alive());
+  if (cmd != CMD_DIRECT_WRITE_DATA && cmd != CMD_PIPE_WRITE_DATA) {
+    printf("[OD] rx cmd=0x%04X len=%u sec=%d sess=%d\r\n", (unsigned)cmd,
+           (unsigned)frame_len, (int)sec_enabled(), (int)session_alive());
+  }
   if (sec_enabled() && cmd != CMD_AUTHENTICATE) {
     if (frame_len >= 31u) {
       if (!session_alive()) {
@@ -1414,6 +1428,7 @@ void opendisplay_pipe_process(void)
     s_long_write_conn = 0xFFu;
     cfg_chunk_reset();
     nfc_write_chunk_reset();
+    opendisplay_pipe_write_reset();
     opendisplay_display_abort();
   }
   while (k_msgq_get(&s_pipe_msgq, &msg, K_NO_WAIT) == 0) {

@@ -10,6 +10,12 @@ extern "C" {
 
 #define NRF54_GPIO_PIN_UNUSED 0xFFu
 
+/* Encode Pport.pin for configs. Pins 0..15: (port<<4)|pin.
+ * Pins 16..31: 0x80 | (port<<5) | pin  (needed for LM20 D1=P1.31 etc.). */
+#define NRF54_GPIO_CFG(port, pin)                                              \
+	(((pin) > 15) ? (uint8_t)(0x80u | (((port) & 3u) << 5) | ((pin) & 0x1Fu))  \
+		      : (uint8_t)((((port) & 0x0Fu) << 4) | ((pin) & 0x0Fu)))
+
 /* Simple parameterless callback invoked from GPIO interrupt (ISR) context. The
  * handler MUST NOT do I2C/BLE/blocking work; it should only set a flag that the
  * main loop consumes. */

@@ -93,13 +93,14 @@ struct LedConfig {
 #define SENSOR_TYPE_AXP2101     0x0003u
 #define SENSOR_TYPE_SHT40       0x0004u
 #define SENSOR_TYPE_BQ27220     0x0005u
+#define SENSOR_TYPE_NPM1300     0x0006u
 
 struct SensorData {
   uint8_t instance_number;
   uint16_t sensor_type;
   uint8_t bus_id;
-  uint8_t i2c_addr_7bit;       /* 0 or 0xFF = per-sensor default (SHT40 0x44, BQ27220 0x55) */
-  uint8_t msd_data_start_byte; /* SHT40: 3-byte block (0/0xFF=default 7); BQ27220: 1 byte (0xFF=skip) */
+  uint8_t i2c_addr_7bit;       /* 0 or 0xFF = per-sensor default (SHT40 0x44, BQ27220 0x55, NPM1300 0x6B) */
+  uint8_t msd_data_start_byte; /* SHT40: 3-byte block (0/0xFF=default 7); BQ27220/NPM1300: 1 byte (0xFF=skip) */
   uint8_t reserved[24];
 } __attribute__((packed));
 

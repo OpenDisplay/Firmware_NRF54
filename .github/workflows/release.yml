@@ -39,11 +39,22 @@ jobs:
           SHA: ${{ github.sha }}
         run: ./build.sh
 
+      - name: Build nRF54LM20A Firmware
+        working-directory: Firmware_NRF54
+        env:
+          BUILD_VERSION: ${{ github.event.release.tag_name }}
+          SHA: ${{ github.sha }}
+          BOARD: xiao_nrf54lm20a/nrf54lm20a/cpuapp
+          BUILD_DIR: build-lm20
+        run: ./build.sh
+
       - name: Package hex
         run: |
           mkdir -p firmware_output
           cp Firmware_NRF54/build/merged.hex \
             "firmware_output/nrf54l15-${{ github.event.release.tag_name }}.hex"
+          cp Firmware_NRF54/build-lm20/merged.hex \
+            "firmware_output/nrf54lm20a-${{ github.event.release.tag_name }}.hex"
 
       - name: Upload Release Assets
         uses: svenstaro/upload-release-action@v2

@@ -42,12 +42,14 @@
  *   bit1 zip                     - zip compressed transfer (full window)
  *   bit2 g5                      - group 5 compression (not implemented)
  *   bit3 direct_write            - bufferless direct write
+ *   bit4 pipe_write              - sliding-window PIPE_WRITE (0x80-0x82)
  * This firmware implements the 512-byte streaming inflater (od_zlib_stream), so
- * compressed direct writes are gated on the streaming_decompression bit. */
+ * compressed direct/pipe writes are gated on the streaming_decompression bit. */
 #define TRANSMISSION_MODE_STREAMING_DECOMPRESSION (1u << 0)
 #define TRANSMISSION_MODE_ZIP                     (1u << 1)
 #define TRANSMISSION_MODE_G5                      (1u << 2)
 #define TRANSMISSION_MODE_DIRECT_WRITE            (1u << 3)
+#define TRANSMISSION_MODE_PIPE_WRITE              (1u << 4)
 #define TRANSMISSION_MODE_CLEAR_ON_BOOT           (1u << 7)
 
 #endif

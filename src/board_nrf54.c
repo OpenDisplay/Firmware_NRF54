@@ -5,13 +5,23 @@
 
 #if defined(NRF54_BOARD_LM20)
 
-/* P1.13 — nPM1300 ship-mode / hold (see XIAO nRF54LM20 schematic). */
-#define NRF54LM20_SHPHLD 0x1Du
+/*
+ * P1.12 — Seeed power_en (regulator-fixed in DTS). Do not use CONFIG_REGULATOR
+ * here: enabling it breaks nordic,nrf-usbhs-wrapper on this board.
+ * P1.13 is PDM mic CLK. SHPHLD is a separate board pad (not this GPIO).
+ */
+#define NRF54LM20_POWER_EN 0x1Cu
+/* Mic pads only — RGB comes from OpenDisplay LED TLV (nrf54lm20-xiao). */
+#define NRF54LM20_MIC_CLK  0x1Du /* P1.13 */
+#define NRF54LM20_MIC_DIN  0x1Eu /* P1.14 */
 
 void board_nrf54_early_init(void)
 {
-	nrf54_gpio_configure_output(NRF54LM20_SHPHLD, true);
-	k_msleep(10);
+	nrf54_gpio_configure_output(NRF54LM20_POWER_EN, true);
+	/* Disconnect unused Sense mic pads so they do not float. */
+	nrf54_gpio_park(NRF54LM20_MIC_CLK);
+	nrf54_gpio_park(NRF54LM20_MIC_DIN);
+	k_msleep(20);
 }
 
 void board_nrf54_prepare_epd_rail(void)

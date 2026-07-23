@@ -39,3 +39,42 @@ jobs:
             Firmware_NRF54/build/merged.hex
             Firmware_NRF54/build/zephyr/zephyr/zephyr.hex
           if-no-files-found: error
+
+  build-lm20:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache NCS SDK
+        id: cache-ncs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/ncs/v3.3.1
+            ~/ncs/toolchains
+          key: ncs-v3.3.1-${{ runner.os }}
+
+      - name: Install NCS SDK and toolchain
+        if: steps.cache-ncs.outputs.cache-hit != 'true'
+        run: |
+          pip install --upgrade pip nrfutil
+          nrfutil install sdk-manager
+          nrfutil sdk-manager install --ncs-version v3.3.1
+
+      - name: Build firmware (XIAO nRF54LM20A)
+        working-directory: Firmware_NRF54
+        env:
+          NCS_ROOT: ${{ env.HOME }}/ncs/v3.3.1
+          BOARD: xiao_nrf54lm20a/nrf54lm20a/cpuapp
+          BUILD_DIR: build-lm20
+        run: ./build.sh
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-xiao-nrf54lm20a
+          path: |
+            Firmware_NRF54/build-lm20/merged.hex
+            Firmware_NRF54/build-lm20/zephyr/zephyr/zephyr.hex
+          if-no-files-found: error

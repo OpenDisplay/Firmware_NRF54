@@ -24,12 +24,25 @@ static const struct device *gpio_dev(uint8_t port)
 
 bool nrf54_pin_decode(uint8_t cfg, uint8_t *port_out, uint8_t *pin_out)
 {
+	uint8_t port;
+	uint8_t pin;
+
 	if (cfg == NRF54_GPIO_PIN_UNUSED) {
 		return false;
 	}
-	uint8_t port = (uint8_t)((cfg >> 4) & 0x0Fu);
-	uint8_t pin = (uint8_t)(cfg & 0x0Fu);
-	if (port > 3u || pin > 15u) {
+	/*
+	 * Compact pin byte:
+	 *   bit7=0: (port << 4) | pin   — pin 0..15 (legacy, L15-safe)
+	 *   bit7=1: 0x80 | (port << 5) | pin — pin 0..31 (LM20 D1/D2/D3 etc.)
+	 */
+	if ((cfg & 0x80u) != 0u) {
+		port = (uint8_t)((cfg >> 5) & 0x03u);
+		pin = (uint8_t)(cfg & 0x1Fu);
+	} else {
+		port = (uint8_t)((cfg >> 4) & 0x0Fu);
+		pin = (uint8_t)(cfg & 0x0Fu);
+	}
+	if (port > 3u || pin > 31u) {
 		return false;
 	}
 	if (gpio_dev(port) == NULL || !device_is_ready(gpio_dev(port))) {

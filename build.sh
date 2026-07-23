@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${APP_DIR:-${SCRIPT_DIR}/zephyr}"
 BUILD_DIR="${BUILD_DIR:-${SCRIPT_DIR}/build}"
 BOARD="${BOARD:-xiao_nrf54l15/nrf54l15/cpuapp}"
-PROFILE="${PROFILE:-battery}"   # battery | uart
+PROFILE="${PROFILE:-battery}"   # battery | uart | quiet
 PURGE="${PURGE:-always}"        # always | never | auto
 
 export PROFILE
@@ -14,10 +14,12 @@ export PROFILE
 # shellcheck source=ncs-env.sh
 source "${SCRIPT_DIR}/ncs-env.sh"
 
-CMAKE_ARGS=()
+CMAKE_ARGS=(-DBOARD_ROOT="${SCRIPT_DIR}")
 if [[ "${PROFILE}" == "uart" ]]; then
   CMAKE_ARGS+=(-DEXTRA_CONF_FILE="${APP_DIR}/prj_uart.conf")
 fi
+# PROFILE=quiet is picked up from the environment in CMakeLists.txt
+# (prj_quiet.conf + OD_LOW_POWER_QUIET).
 if [[ -n "${BUILD_VERSION:-}" ]]; then
   CMAKE_ARGS+=(-DBUILD_VERSION="${BUILD_VERSION}")
 fi
@@ -49,6 +51,8 @@ if [[ -f "${CONF}" ]]; then
   echo "Profile: ${PROFILE}  serial=$(grep -E '^CONFIG_SERIAL=|^# CONFIG_SERIAL is not set' "${CONF}" | head -1)"
   if [[ "${PROFILE}" == "uart" ]]; then
     echo "Serial monitor: 115200 baud on the board USB port"
+  elif [[ "${PROFILE}" == "quiet" ]]; then
+    echo "Quiet build: LOG off, no heartbeat prints (for advertising-current tests)"
   else
     echo "Logs: SEGGER RTT (battery build has no USB UART)"
   fi

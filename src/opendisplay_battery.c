@@ -1,6 +1,7 @@
 #include "opendisplay_battery.h"
 #include "opendisplay_ble.h"
 #include "opendisplay_sensor_bq27220.h"
+#include "opendisplay_sensor_npm1300.h"
 #include "opendisplay_structs.h"
 #include "nrf54_gpio.h"
 
@@ -166,9 +167,15 @@ static float battery_read_saadc_volts(void)
 #endif
 }
 
-/* Uncached: BQ27220 fuel gauge first, then SAADC. */
+/* Uncached: nPM1300 (LM20) / BQ27220 first, then SAADC. */
 static float battery_read_uncached(void)
 {
+	if (opendisplay_sensor_npm1300_is_configured()) {
+		float v = opendisplay_sensor_npm1300_voltage_volts();
+		if (v >= 0.0f) {
+			return v;
+		}
+	}
 	if (opendisplay_sensor_bq27220_is_configured()) {
 		float gauge_v = opendisplay_sensor_bq27220_voltage_volts();
 		if (gauge_v >= 0.0f) {

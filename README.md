@@ -70,11 +70,27 @@ References: [NCS RAS reflector sample](https://github.com/nrfconnect/sdk-nrf/tre
 
 ## nRF54LM20A
 
-NCS v3.3.1 does not yet ship a `seeed-xiao-nrf54lm20a` board target. LM20 builds remain **L15-only** until the Seeed board DTS is ported into this tree. Use the Nordic `nrf54lm20dk` board as a reference for bring-up.
+Seeed XIAO nRF54LM20A board DTS is vendored under `boards/seeed/xiao_nrf54lm20a/`.
+
+```bash
+BOARD=xiao_nrf54lm20a/nrf54lm20a/cpuapp BUILD_DIR=build-lm20 ./build.sh
+BOARD=xiao_nrf54lm20a/nrf54lm20a/cpuapp BUILD_DIR=build-lm20 ./flash.sh
+# advertising-current tests:
+PROFILE=quiet BOARD=xiao_nrf54lm20a/nrf54lm20a/cpuapp BUILD_DIR=build-lm20 ./build.sh
+```
+
+See [docs/LM20_NCS.md](docs/LM20_NCS.md). Default `./build.sh` remains L15.
 
 ## Pin encoding
 
-OpenDisplay configs use compact `(port << 4) | pin` bytes (e.g. `P2.02` → `0x22`). Use the nRF54 toolbox presets — do not reuse nRF52840 GPIO numbers.
+OpenDisplay configs use a compact GPIO byte:
+
+| Pins | Encoding | Example |
+|------|----------|---------|
+| 0–15 | `(port << 4) \| pin` | `P2.02` → `0x22` |
+| 16–31 | `0x80 \| (port << 5) \| pin` | `P1.31` → `0xBF` |
+
+LM20 XIAO D1/D2/D3 are P1.31/30/29 and need the high-pin form. Use the nRF54 toolbox presets — do not reuse L15 or nRF52840 pin bytes.
 
 ## Layout
 

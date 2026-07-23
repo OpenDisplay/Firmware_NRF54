@@ -1,8 +1,9 @@
 # Legacy PlatformIO (removed; keep if old trees linger)
 .pio
 
-# NCS / west build outputs
+# NCS / west build outputs (default build/ and BUILD_DIR=build-lm20 etc.)
 /build/
+/build-*/
 
 # CMake factory-config generation stamp (factory_config_data.c stub stays tracked)
 src/generated/.factory_gen_stamp
