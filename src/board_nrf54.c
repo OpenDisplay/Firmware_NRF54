@@ -14,6 +14,9 @@
 /* Mic pads only — RGB comes from OpenDisplay LED TLV (nrf54lm20-xiao). */
 #define NRF54LM20_MIC_CLK  0x1Du /* P1.13 */
 #define NRF54LM20_MIC_DIN  0x1Eu /* P1.14 */
+/* uart20 console pins (MCUboot default); park so USB-UART is not back-fed. */
+#define NRF54LM20_UART20_RX 0x1Au /* P1.10 */
+#define NRF54LM20_UART20_TX 0x1Bu /* P1.11 */
 
 void board_nrf54_early_init(void)
 {
@@ -21,7 +24,12 @@ void board_nrf54_early_init(void)
 	/* Disconnect unused Sense mic pads so they do not float. */
 	nrf54_gpio_park(NRF54LM20_MIC_CLK);
 	nrf54_gpio_park(NRF54LM20_MIC_DIN);
-	k_msleep(20);
+	/* MCUboot may have left UART TX driven; app has SERIAL=n and never
+	 * reclaims the pins unless we park them here. */
+	nrf54_gpio_park(NRF54LM20_UART20_RX);
+	nrf54_gpio_park(NRF54LM20_UART20_TX);
+	/* nPM1300 needs the rail up before bit-bang I2C; 20ms was marginal. */
+	k_msleep(50);
 }
 
 void board_nrf54_prepare_epd_rail(void)

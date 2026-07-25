@@ -6,7 +6,7 @@
 #define CMD_CONFIG_READ         0x0040u
 #define CMD_CONFIG_WRITE        0x0041u
 #define CMD_CONFIG_CHUNK        0x0042u
-#define CMD_FIRMWARE_VERSION    0x0043u
+#define CMD_FIRMWARE_VERSION    0x0043u  /* resp: maj,min,shaLen,sha[,patch] */
 #define CMD_READ_MSD            0x0044u
 #define CMD_CONFIG_CLEAR        0x0045u
 #define CMD_DIRECT_WRITE_START  0x0070u

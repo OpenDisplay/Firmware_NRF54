@@ -29,6 +29,7 @@
 
 #define OD_NFC_IC_AUTO      0u
 #define OD_NFC_IC_TNB132M   1u
+#define OD_NFC_IC_SOC_NFCT  2u
 
 #define OD_NFC_REC_TEXT             0u
 #define OD_NFC_REC_URI              1u

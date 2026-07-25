@@ -15,24 +15,41 @@
 #include <zephyr/kernel.h>
 #include <psa/crypto.h>
 
-#ifndef OPENDISPLAY_BUILD_ID
-#define OPENDISPLAY_BUILD_ID "nrf54"
-#endif
 #ifndef SHA
-#define SHA
+#define SHA ""
 #endif
 #define OD_STRINGIFY(x) #x
 #define OD_XSTRINGIFY(x) OD_STRINGIFY(x)
 #define SHA_STRING OD_XSTRINGIFY(SHA)
 
+#define FIRMWARE_SHA_HEX_BYTES 40
+static const char kFirmwareShaPlaceholder[FIRMWARE_SHA_HEX_BYTES + 1] =
+    "0000000000000000000000000000000000000000";
+
+/* SHA may be -DSHA=abc or CMake SHA=\"abc\"; XSTRINGIFY covers both and may
+ * leave surrounding quotes. Empty / missing SHA → 40 zero hex chars (Firmware). */
 static const char *fw_sha_string(void)
 {
-	const char *sha = SHA_STRING;
+  static char sha_buf[FIRMWARE_SHA_HEX_BYTES + 1];
+  const char *sha = SHA_STRING;
+  size_t len;
 
-	if (sha[0] != '\0') {
-		return sha;
-	}
-	return OPENDISPLAY_BUILD_ID;
+  if (sha[0] == '"') {
+    sha++;
+  }
+  len = strlen(sha);
+  if (len > 0u && sha[len - 1u] == '"') {
+    len--;
+  }
+  if (len == 0u) {
+    return kFirmwareShaPlaceholder;
+  }
+  if (len > FIRMWARE_SHA_HEX_BYTES) {
+    len = FIRMWARE_SHA_HEX_BYTES;
+  }
+  memcpy(sha_buf, sha, len);
+  sha_buf[len] = '\0';
+  return sha_buf;
 }
 
 typedef struct {
@@ -587,10 +604,13 @@ static void pipe_send(uint8_t connection, const uint8_t *data, uint16_t len)
 
 static void reply_firmware_version(uint8_t connection)
 {
-  uint8_t rsp[2 + 1 + 1 + 1 + 40];
+  /* [ACK][0x43][major][minor][shaLen][sha…][patch] — patch trails so old
+   * hosts that stop after SHA keep working. */
+  uint8_t rsp[2 + 1 + 1 + 1 + 40 + 1];
   uint16_t ver = opendisplay_ble_get_app_version();
   uint8_t major = (uint8_t)((ver >> 8) & 0xFFu);
   uint8_t minor = (uint8_t)(ver & 0xFFu);
+  uint8_t patch = opendisplay_ble_get_app_version_patch();
   const char *sha = fw_sha_string();
   uint8_t sha_len = (uint8_t)strlen(sha);
   uint16_t o = 0;
@@ -605,6 +625,7 @@ static void reply_firmware_version(uint8_t connection)
   rsp[o++] = sha_len;
   memcpy(&rsp[o], sha, sha_len);
   o += sha_len;
+  rsp[o++] = patch;
   pipe_send(connection, rsp, o);
 }
 

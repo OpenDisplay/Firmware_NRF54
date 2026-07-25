@@ -16,6 +16,29 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Parse release tag
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Tag must look like MAJOR.MINOR or MAJOR.MINOR.PATCH (optional leading v). Got: ${TAG}"
+            exit 1
+          fi
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+          [[ -z "${PATCH}" ]] && PATCH=0
+          if (( MAJOR > 255 || MINOR > 255 || PATCH > 255 )); then
+            echo "MAJOR, MINOR, and PATCH must be 0..255"
+            exit 1
+          fi
+          # Pass the full tag (with optional v) so OD_FW_VERSION parses all three parts.
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Parsed ${TAG} -> ${MAJOR}.${MINOR}.${PATCH}"
+
       - name: Cache NCS SDK
         id: cache-ncs
         uses: actions/cache@v4
@@ -33,28 +56,39 @@ jobs:
           nrfutil sdk-manager install --ncs-version v3.3.1
 
       - name: Build nRF54L15 Firmware
-        working-directory: Firmware_NRF54
         env:
-          BUILD_VERSION: ${{ github.event.release.tag_name }}
+          BUILD_VERSION: ${{ steps.ver.outputs.tag }}
+          OD_FW_VERSION: ${{ steps.ver.outputs.tag }}
           SHA: ${{ github.sha }}
         run: ./build.sh
 
       - name: Build nRF54LM20A Firmware
-        working-directory: Firmware_NRF54
         env:
-          BUILD_VERSION: ${{ github.event.release.tag_name }}
+          BUILD_VERSION: ${{ steps.ver.outputs.tag }}
+          OD_FW_VERSION: ${{ steps.ver.outputs.tag }}
           SHA: ${{ github.sha }}
           BOARD: xiao_nrf54lm20a/nrf54lm20a/cpuapp
           BUILD_DIR: build-lm20
         run: ./build.sh
 
-      - name: Package hex
+      - name: Package firmware
         run: |
           mkdir -p firmware_output
-          cp Firmware_NRF54/build/merged.hex \
-            "firmware_output/nrf54l15-${{ github.event.release.tag_name }}.hex"
-          cp Firmware_NRF54/build-lm20/merged.hex \
-            "firmware_output/nrf54lm20a-${{ github.event.release.tag_name }}.hex"
+          TAG="${{ steps.ver.outputs.tag }}"
+          cp build/merged.hex "firmware_output/nrf54l15-${TAG}.hex"
+          cp build-lm20/merged.hex "firmware_output/nrf54lm20a-${TAG}.hex"
+          if [[ -f build/zephyr/zephyr/zephyr.signed.bin ]]; then
+            cp build/zephyr/zephyr/zephyr.signed.bin "firmware_output/nrf54l15-${TAG}-app_update.bin"
+          fi
+          if [[ -f build-lm20/zephyr/zephyr/zephyr.signed.bin ]]; then
+            cp build-lm20/zephyr/zephyr/zephyr.signed.bin "firmware_output/nrf54lm20a-${TAG}-app_update.bin"
+          fi
+          if [[ -f build/dfu_application.zip ]]; then
+            cp build/dfu_application.zip "firmware_output/nrf54l15-${TAG}-dfu.zip"
+          fi
+          if [[ -f build-lm20/dfu_application.zip ]]; then
+            cp build-lm20/dfu_application.zip "firmware_output/nrf54lm20a-${TAG}-dfu.zip"
+          fi
 
       - name: Upload Release Assets
         uses: svenstaro/upload-release-action@v2

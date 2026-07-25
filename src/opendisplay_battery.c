@@ -198,7 +198,8 @@ float opendisplay_battery_read_voltage_volts(void)
 	}
 	cached = battery_read_uncached();
 	last_read_ms = now;
-	have_reading = true;
+	/* Only TTL-cache successful readings; retry soon after a miss. */
+	have_reading = (cached >= 0.0f);
 	return cached;
 }
 

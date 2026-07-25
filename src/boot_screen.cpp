@@ -38,7 +38,7 @@ static const struct SecurityConfig *boot_sec(void)
   return od_get_parsed_security();
 }
 
-static void boot_chip_id_hex6(char out[7])
+static uint32_t boot_chip_id_last24(void)
 {
   uint8_t id[8];
   uint64_t uid = 0;
@@ -46,7 +46,7 @@ static void boot_chip_id_hex6(char out[7])
   for (unsigned i = 0; i < sizeof(id); i++) {
     uid = (uid << 8) | id[i];
   }
-  snprintf(out, 7, "%06lX", (unsigned long)(uid & 0xFFFFFFu));
+  return (uint32_t)(uid & 0xFFFFFFu);
 }
 
 static uint8_t boot_fw_major(void)
@@ -59,6 +59,11 @@ static uint8_t boot_fw_minor(void)
 {
   uint16_t ver = opendisplay_ble_get_app_version();
   return (uint8_t)(ver & 0xFFu);
+}
+
+static uint8_t boot_fw_patch(void)
+{
+  return opendisplay_ble_get_app_version_patch();
 }
 
 static int boot_get_plane(uint8_t color_scheme)
@@ -692,24 +697,17 @@ bool writeBootScreenWithQr(BBEPAPER &epd) {
     }
     const bool colorSwatchPlane1 = useBitplanes && numSwatches > 0;
 
-    char chipId[7];
     char last6[7];
-    boot_chip_id_hex6(chipId);
-    memcpy(last6, chipId, 6);
-    last6[6] = '\0';
-    for (int i = 0; i < 6; i++) {
-        if (last6[i] >= 'a' && last6[i] <= 'f') {
-            last6[i] = (char)(last6[i] - ('a' - 'A'));
-        }
-    }
+    const uint32_t last3 = boot_chip_id_last24();
+    snprintf(last6, sizeof(last6), "%06lX", (unsigned long)last3);
 
     uint8_t payload[23] = {0};
     uint16_t res = boot_cfg()->displays[0].tag_type;
     payload[0] = (uint8_t)((res >> 8) & 0xFF);
     payload[1] = (uint8_t)(res & 0xFF);
-    payload[2] = (uint8_t)strtoul(last6, NULL, 16);
-    payload[3] = (uint8_t)strtoul(last6 + 2, NULL, 16);
-    payload[4] = (uint8_t)strtoul(last6 + 4, NULL, 16);
+    payload[2] = (uint8_t)((last3 >> 16) & 0xFF);
+    payload[3] = (uint8_t)((last3 >> 8) & 0xFF);
+    payload[4] = (uint8_t)(last3 & 0xFF);
     if (boot_sec() != NULL && (boot_sec()->flags & SECURITY_FLAG_SHOW_KEY_ON_SCREEN) != 0u) {
         memcpy(&payload[5], boot_sec()->encryption_key, 16);
     } else {
@@ -724,6 +722,7 @@ bool writeBootScreenWithQr(BBEPAPER &epd) {
 
     char url[128];
     snprintf(url, sizeof(url), "https://opendisplay.org/l/?%s", payloadB64);
+    printf("[OD] boot QR id=OD%s url=%s\r\n", last6, url);
 
     QRCode qr;
     const uint8_t qrVersion = 6;
@@ -752,10 +751,14 @@ bool writeBootScreenWithQr(BBEPAPER &epd) {
     char fwLine[32];
     if (useZoneLayout) {
         snprintf(nameLine, sizeof(nameLine), "ID:   OD%s", last6);
-        snprintf(fwLine, sizeof(fwLine), "FW:   OD ver %u.%u", (unsigned)boot_fw_major(), (unsigned)boot_fw_minor());
+        snprintf(fwLine, sizeof(fwLine), "FW:   OD ver %u.%u.%u",
+                 (unsigned)boot_fw_major(), (unsigned)boot_fw_minor(),
+                 (unsigned)boot_fw_patch());
     } else {
         snprintf(nameLine, sizeof(nameLine), "OD%s", last6);
-        snprintf(fwLine, sizeof(fwLine), "FW:O %u.%u", (unsigned)boot_fw_major(), (unsigned)boot_fw_minor());
+        snprintf(fwLine, sizeof(fwLine), "FW:O %u.%u.%u",
+                 (unsigned)boot_fw_major(), (unsigned)boot_fw_minor(),
+                 (unsigned)boot_fw_patch());
     }
     char k1[24], k2[24];
     if (useZoneLayout) {
@@ -919,8 +922,9 @@ bool writeBootScreenWithQr(BBEPAPER &epd) {
     }
 #endif
     if (useZoneLayout && qrRight) {
-        const int qrDataRightPx = modulePx * ((int)qrSize + (int)quiet);
-        qrX = contentRightX - qrDataRightPx;
+        /* Keep full QR box (data + quiet on both sides). Using qrSize+quiet here
+         * used to shift the code right by one quiet zone and clip the right edge. */
+        qrX = contentRightX - qrPx;
         textMaxX = qrX - pad;
     }
     if (useZoneLayout) {

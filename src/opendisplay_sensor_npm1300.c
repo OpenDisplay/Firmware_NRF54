@@ -115,8 +115,17 @@ static bool npm1300_sample(const struct SensorData *s)
 	const uint8_t tasks[3] = {1u, 1u, 1u};
 	uint8_t results[11];
 	uint8_t chg_stat = 0u;
+	struct od_i2c_bus bus;
+
+	if (!od_sensor_bus_for(s->bus_id, &bus)) {
+		printf("[OD] nPM1300: bad data_bus (id=%u)\r\n", (unsigned)s->bus_id);
+		return false;
+	}
 
 	if (!npm1300_reg_write(s, NPM1300_ADC_BASE, NPM1300_ADC_TASK_VBAT, tasks, sizeof(tasks))) {
+		printf("[OD] nPM1300: ADC task NACK (addr=0x%02X scl=0x%02X sda=0x%02X)\r\n",
+		       (unsigned)npm1300_addr_7bit(s), (unsigned)bus.scl_cfg,
+		       (unsigned)bus.sda_cfg);
 		return false;
 	}
 
@@ -124,6 +133,7 @@ static bool npm1300_sample(const struct SensorData *s)
 	k_busy_wait(NPM1300_ADC_CONV_TIME_US * 4u);
 
 	if (!npm1300_reg_read(s, NPM1300_ADC_BASE, NPM1300_ADC_RESULTS, results, sizeof(results))) {
+		printf("[OD] nPM1300: ADC results read failed\r\n");
 		return false;
 	}
 
@@ -135,10 +145,23 @@ static bool npm1300_sample(const struct SensorData *s)
 
 	s_batt_v = (float)mv / 1000.0f;
 	s_gauge_ok = s_batt_v > 0.5f;
-	/* CHGR.BCHG.CHARGE active when low nibble is 0xC/0xD/0xF. */
 	s_charging = ((chg_stat & 0x0Fu) == 0x0Cu || (chg_stat & 0x0Fu) == 0x0Du ||
 		      (chg_stat & 0x0Fu) == 0x0Fu);
+	if (!s_gauge_ok) {
+		printf("[OD] nPM1300: VBAT code=%u -> %d mV\r\n", (unsigned)code, (int)mv);
+	}
 	return s_gauge_ok;
+}
+
+static bool npm1300_sample_retries(const struct SensorData *s, unsigned attempts)
+{
+	for (unsigned i = 0u; i < attempts; i++) {
+		if (npm1300_sample(s)) {
+			return true;
+		}
+		k_msleep(5);
+	}
+	return false;
 }
 
 bool opendisplay_sensor_npm1300_is_available(void)
@@ -159,6 +182,28 @@ float opendisplay_sensor_npm1300_voltage_volts(void)
 	return s_gauge_ok ? s_batt_v : -1.0f;
 }
 
+static void npm1300_publish_msd(const struct SensorData *s)
+{
+	uint8_t msd_idx;
+	uint8_t soc;
+	uint8_t packed;
+
+	if (s == NULL || s->msd_data_start_byte == 0xFFu || s->msd_data_start_byte > 10u) {
+		return;
+	}
+	msd_idx = s->msd_data_start_byte;
+	soc = s_gauge_ok ? soc_from_voltage(s_batt_v) : 0xFFu;
+	if (!s_gauge_ok || soc > 100u) {
+		opendisplay_ble_set_dynamic_byte(msd_idx, 0xFFu);
+		return;
+	}
+	packed = (uint8_t)(soc & 0x7Fu);
+	if (s_charging) {
+		packed |= NPM1300_MSD_CHARGING_BIT;
+	}
+	opendisplay_ble_set_dynamic_byte(msd_idx, packed);
+}
+
 void opendisplay_sensor_npm1300_init(void)
 {
 	const struct SensorData *s = npm1300_config();
@@ -166,11 +211,13 @@ void opendisplay_sensor_npm1300_init(void)
 	if (s == NULL) {
 		return;
 	}
-	if (!npm1300_sample(s)) {
+	k_msleep(30);
+	if (!npm1300_sample_retries(s, 5u)) {
 		printf("[OD] nPM1300: I2C sample failed (bus/config)\r\n");
 		return;
 	}
-	printf("[OD] nPM1300: VBAT=%.3f V (config I2C)\r\n", (double)s_batt_v);
+	printf("[OD] nPM1300: VBAT=%d mV (config I2C)\r\n", (int)(s_batt_v * 1000.0f));
+	npm1300_publish_msd(s);
 }
 
 void opendisplay_sensor_npm1300_poll(void)
@@ -195,30 +242,13 @@ void opendisplay_sensor_npm1300_poll(void)
 	last_poll_ms = now;
 	have_polled = true;
 
-	if (!npm1300_sample(s)) {
-		s_gauge_ok = false;
-		s_batt_v = -1.0f;
+	if (!npm1300_sample_retries(s, 3u)) {
+		printf("[OD] nPM1300: sample failed, keeping last reading\r\n");
+		npm1300_publish_msd(s);
 		return;
 	}
 
-	uint8_t msd_idx = s->msd_data_start_byte;
-
-	if (msd_idx > 10u) {
-		return;
-	}
-
-	uint8_t soc = s_gauge_ok ? soc_from_voltage(s_batt_v) : 0xFFu;
-
-	if (!s_gauge_ok || soc > 100u) {
-		opendisplay_ble_set_dynamic_byte(msd_idx, 0xFFu);
-	} else {
-		uint8_t packed = (uint8_t)(soc & 0x7Fu);
-
-		if (s_charging) {
-			packed |= NPM1300_MSD_CHARGING_BIT;
-		}
-		opendisplay_ble_set_dynamic_byte(msd_idx, packed);
-	}
+	npm1300_publish_msd(s);
 }
 
 void opendisplay_sensor_npm1300_enter_hibernate(void)

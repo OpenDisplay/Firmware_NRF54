@@ -106,8 +106,18 @@ That is not the same as `Firmware_NRF` SoftDevice System OFF — do not compare
 hibernate current 1:1 with System OFF.
 
 Unused LM20 blocks are disabled in the board overlay (`usbhs`, `pwm20`,
-`i2c30`, `nfct`, `pdm20`, …). Early init parks mic GPIOs only; RGB comes from
+`i2c30`, `pdm20`, …). Early init parks mic GPIOs only; RGB comes from
 the LED config packet.
+
+### NFC (SoC NFCT)
+
+`&nfct` is enabled. Antenna pads are fixed **N1/N2 = P1.01/P1.02** (solder an
+external coil). Runtime enable is via config packet **0x2A** (`nfc_config`) with
+`flags` bit0 set and `nfc_ic_type` = `2` (`soc_nfct`) or `0` (`auto` on LM20).
+`bus_instance` / `power_pin` / `field_detect_pin` are ignored; field presence is
+reported via NFCT events into `adv_button_byte_index` in the MSD. NDEF is
+read/written over BLE `CMD_NFC_ENDPOINT` (same as Silabs toolbox UI). Payload
+lives in RAM until rewritten (not stored on an external tag IC).
 
 ### Current testing
 

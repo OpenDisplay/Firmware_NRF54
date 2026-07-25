@@ -35,14 +35,42 @@ FACTORY_CONFIG_HEX='...' ./build.sh
 BUILD_VERSION=v1.2.3 SHA=$(git rev-parse --short HEAD) ./build.sh
 ```
 
+`build.sh` passes `-Dzephyr_OD_FW_VERSION=...` (sysbuild image prefix). Do not pass bare `-DBUILD_VERSION` — that is Zephyr’s cmake version variable and does not reach the app. Boot screen and BLE `CMD_FIRMWARE_VERSION` both report `major.minor.patch` (e.g. `v2.2.3` → `2.2.3`). The patch byte is appended after the SHA on the wire so older hosts that stop after SHA keep working.
+
 ## Flash
 
 ```bash
-./flash.sh
-# or: pyocd flash -t nrf54l build/merged.hex
+./flash.sh              # factory: chip erase + merged.hex (wipes config)
+./flash.sh update       # primary slot only: keeps display config
+# Defaults to XIAO nRF54LM20A (build-lm20). For L15:
+BUILD_DIR=build BOARD=xiao_nrf54l15/nrf54l15/cpuapp ./flash.sh update
 ```
 
+| Mode | Image | Erase | Keeps display config? |
+|------|-------|-------|------------------------|
+| `factory` (default) | `merged.hex` (MCUboot + app) | chip | No |
+| `update` | `zephyr.signed.hex` (primary slot) | sector | Yes |
+
+Display config (and BLE bonds) live in `settings_storage` **after** both MCUboot slots (`pm_static_*.yml`). BLE OTA only programs the secondary slot; the partition map keeps settings out of that range.
+
+**Important:** nRF Connect Device Manager / the nRF Connect app default to **Erase application settings** on DFU. That uses SMP `zephyr/basic` storage-erase and wipes config. This firmware builds with `CONFIG_MCUMGR_GRP_ZBASIC_STORAGE_ERASE=n` so that command is refused. Still turn the option off in the client if present. Probe `./flash.sh update` keeps settings; only chip-erase **factory** flash clears them.
+
+**Note:** MCUboot is built with UART console disabled (`zephyr/sysbuild/mcuboot.conf`). Leaving UART on caused flat battery current via back-feed into the XIAO USB-UART bridge. After updating MCUboot, use a **factory** flash once (or at least reflash `merged.hex`); `./flash.sh update` alone does not replace MCUboot. The app also parks uart20 pins at boot so an older MCUboot image is mitigated.
+
 Battery builds log via SEGGER RTT when a J-Link probe is attached.
+
+## OTA (MCUboot + MCUmgr SMP)
+
+Factory/probe flash uses `merged.hex` (MCUboot + app). Over-the-air updates use the signed `zephyr.signed.bin` (or `dfu_application.zip`) printed by `./build.sh` after a successful build.
+
+Images are signed with the NCS default **ED25519** development key (`bootloader/mcuboot/root-ed25519.pem`). Replace that key for production.
+
+| Encryption in config | SMP GATT at boot | How to open OTA |
+|----------------------|------------------|-----------------|
+| Off | Registered | Upload with nRF Connect Device Manager / `mcumgr` / `nrfutil` |
+| On | Hidden | Authenticate over the OpenDisplay pipe, send `CMD_ENTER_DFU` (`0x0051`), reconnect, then upload |
+
+After `0x0051` the device registers the SMP service, disconnects, and re-advertises so the client rediscovers GATT. On the next reboot with encryption on, SMP is hidden again.
 
 ## Channel Sounding
 

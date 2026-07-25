@@ -68,7 +68,7 @@
 };
 
 &nfct {
-	status = "disabled";
+	status = "okay";
 };
 
 &pdm20 {

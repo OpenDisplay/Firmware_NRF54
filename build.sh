@@ -20,11 +20,16 @@ if [[ "${PROFILE}" == "uart" ]]; then
 fi
 # PROFILE=quiet is picked up from the environment in CMakeLists.txt
 # (prj_quiet.conf + OD_LOW_POWER_QUIET).
-if [[ -n "${BUILD_VERSION:-}" ]]; then
-  CMAKE_ARGS+=(-DBUILD_VERSION="${BUILD_VERSION}")
+FW_VER="${OD_FW_VERSION:-${BUILD_VERSION:-}}"
+if [[ -n "${FW_VER}" ]]; then
+  # Export for app CMakeLists (sysbuild-safe). Also pass cmake arg for completeness.
+  export OD_FW_VERSION="${FW_VER}"
+  export BUILD_VERSION="${FW_VER}"
+  CMAKE_ARGS+=(-Dzephyr_OD_FW_VERSION="${FW_VER}")
 fi
 if [[ -n "${SHA:-}" ]]; then
-  CMAKE_ARGS+=(-DGIT_SHA="${SHA}")
+  export SHA
+  CMAKE_ARGS+=(-Dzephyr_GIT_SHA="${SHA}")
 fi
 if [[ -n "${FACTORY_CONFIG_HEX:-}" ]]; then
   CMAKE_ARGS+=(-DFACTORY_CONFIG_HEX="${FACTORY_CONFIG_HEX}")
@@ -43,9 +48,35 @@ if [[ ! -f "${HEX}" ]]; then
   HEX="${BUILD_DIR}/opendisplay_nrf54/zephyr/zephyr.hex"
 fi
 
+UPDATE_BIN=""
+for candidate in \
+  "${BUILD_DIR}/zephyr/zephyr/zephyr.signed.bin" \
+  "${BUILD_DIR}/zephyr/app_update.bin" \
+  "${BUILD_DIR}/app_update.bin"; do
+  if [[ -f "${candidate}" ]]; then
+    UPDATE_BIN="${candidate}"
+    break
+  fi
+done
+DFU_ZIP=""
+for candidate in \
+  "${BUILD_DIR}/dfu_application.zip" \
+  "${BUILD_DIR}/zephyr/dfu_application.zip"; do
+  if [[ -f "${candidate}" ]]; then
+    DFU_ZIP="${candidate}"
+    break
+  fi
+done
+
 CONF="${BUILD_DIR}/zephyr/zephyr/.config"
 echo
 echo "Built: ${HEX}"
+if [[ -n "${UPDATE_BIN}" ]]; then
+  echo "OTA:   ${UPDATE_BIN}"
+fi
+if [[ -n "${DFU_ZIP}" ]]; then
+  echo "DFU:   ${DFU_ZIP}"
+fi
 echo "Flash: ./flash.sh"
 if [[ -f "${CONF}" ]]; then
   echo "Profile: ${PROFILE}  serial=$(grep -E '^CONFIG_SERIAL=|^# CONFIG_SERIAL is not set' "${CONF}" | head -1)"

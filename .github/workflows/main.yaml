@@ -26,7 +26,6 @@ jobs:
           nrfutil sdk-manager install --ncs-version v3.3.1
 
       - name: Build firmware (XIAO nRF54L15)
-        working-directory: Firmware_NRF54
         env:
           NCS_ROOT: ${{ env.HOME }}/ncs/v3.3.1
         run: ./build.sh
@@ -36,8 +35,9 @@ jobs:
         with:
           name: firmware-xiao-nrf54l15
           path: |
-            Firmware_NRF54/build/merged.hex
-            Firmware_NRF54/build/zephyr/zephyr/zephyr.hex
+            build/merged.hex
+            build/zephyr/zephyr/zephyr.signed.bin
+            build/dfu_application.zip
           if-no-files-found: error
 
   build-lm20:
@@ -63,7 +63,6 @@ jobs:
           nrfutil sdk-manager install --ncs-version v3.3.1
 
       - name: Build firmware (XIAO nRF54LM20A)
-        working-directory: Firmware_NRF54
         env:
           NCS_ROOT: ${{ env.HOME }}/ncs/v3.3.1
           BOARD: xiao_nrf54lm20a/nrf54lm20a/cpuapp
@@ -75,6 +74,7 @@ jobs:
         with:
           name: firmware-xiao-nrf54lm20a
           path: |
-            Firmware_NRF54/build-lm20/merged.hex
-            Firmware_NRF54/build-lm20/zephyr/zephyr/zephyr.hex
+            build-lm20/merged.hex
+            build-lm20/zephyr/zephyr/zephyr.signed.bin
+            build-lm20/dfu_application.zip
           if-no-files-found: error

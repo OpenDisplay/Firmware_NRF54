@@ -6,6 +6,9 @@
 
 #include <stdio.h>
 #include <zephyr/kernel.h>
+#if defined(CONFIG_BOOTLOADER_MCUBOOT)
+#include <zephyr/dfu/mcuboot.h>
+#endif
 
 static void idle_delay_ms(uint32_t delay_ms)
 {
@@ -30,6 +33,10 @@ int main(void)
 	board_nrf54_early_init();
 	board_nrf54_prepare_epd_rail();
 	opendisplay_ble_init();
+#if defined(CONFIG_BOOTLOADER_MCUBOOT)
+	/* Confirm running image so MCUboot will not revert after OTA. */
+	(void)boot_write_img_confirmed();
+#endif
 
 	while (1) {
 		cfg = opendisplay_get_global_config();

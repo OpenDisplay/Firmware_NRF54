@@ -21,6 +21,7 @@ void opendisplay_ble_reload_config_from_nvm(void);
 void opendisplay_ble_restart_advertising(void);
 
 uint16_t opendisplay_ble_get_app_version(void);
+uint8_t opendisplay_ble_get_app_version_patch(void);
 void opendisplay_ble_copy_msd_bytes(uint8_t out[16]);
 void opendisplay_ble_update_msd(bool refresh_advertising);
 void opendisplay_ble_set_dynamic_byte(uint8_t index, uint8_t value);

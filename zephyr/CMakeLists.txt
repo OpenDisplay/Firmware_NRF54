@@ -82,11 +82,30 @@ else()
   target_compile_definitions(app PRIVATE NRF54_BOARD_L15)
 endif()
 
-if(DEFINED BUILD_VERSION)
-  target_compile_definitions(app PRIVATE BUILD_VERSION=\"${BUILD_VERSION}\")
+# OpenDisplay app version string (boot screen + CMD_FIRMWARE_VERSION major.minor.patch).
+# Prefer -DOD_FW_VERSION / -Dzephyr_OD_FW_VERSION; also accept ENV from build.sh
+# because sysbuild does not always forward unprefixed cache vars into the app image.
+set(_od_fw_ver "")
+if(DEFINED OD_FW_VERSION AND NOT "${OD_FW_VERSION}" STREQUAL "")
+  set(_od_fw_ver "${OD_FW_VERSION}")
+elseif(DEFINED ENV{OD_FW_VERSION} AND NOT "$ENV{OD_FW_VERSION}" STREQUAL "")
+  set(_od_fw_ver "$ENV{OD_FW_VERSION}")
+elseif(DEFINED ENV{BUILD_VERSION} AND NOT "$ENV{BUILD_VERSION}" STREQUAL "")
+  set(_od_fw_ver "$ENV{BUILD_VERSION}")
 endif()
-if(DEFINED GIT_SHA)
-  target_compile_definitions(app PRIVATE SHA=\"${GIT_SHA}\")
+if(NOT "${_od_fw_ver}" STREQUAL "")
+  target_compile_definitions(app PRIVATE OD_FW_VERSION=\"${_od_fw_ver}\")
+  message(STATUS "OpenDisplay FW version: ${_od_fw_ver}")
+endif()
+# Prefer -DGIT_SHA / -Dzephyr_GIT_SHA (sysbuild strips zephyr_); also ENV{SHA}.
+set(_od_git_sha "")
+if(DEFINED GIT_SHA AND NOT "${GIT_SHA}" STREQUAL "")
+  set(_od_git_sha "${GIT_SHA}")
+elseif(DEFINED ENV{SHA} AND NOT "$ENV{SHA}" STREQUAL "")
+  set(_od_git_sha "$ENV{SHA}")
+endif()
+if(NOT "${_od_git_sha}" STREQUAL "")
+  target_compile_definitions(app PRIVATE SHA=\"${_od_git_sha}\")
 endif()
 if(FACTORY_CONFIG_HEX)
   target_compile_definitions(app PRIVATE FACTORY_HAS_EMBED=1)
@@ -123,6 +142,7 @@ target_sources(app PRIVATE
   ${SRC_DIR}/opendisplay_pipe.c
   ${SRC_DIR}/opendisplay_pipe_write.cpp
   ${SRC_DIR}/opendisplay_cs.c
+  ${SRC_DIR}/opendisplay_nfc.c
   ${SRC_DIR}/factory_config.c
   ${GEN_DIR}/factory_config_data.c
   ${SRC_DIR}/qr/qrcode.c

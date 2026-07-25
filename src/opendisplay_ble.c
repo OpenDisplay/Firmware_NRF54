@@ -14,6 +14,7 @@
 #include "opendisplay_sensor_sht40.h"
 #include "opendisplay_sensor_bq27220.h"
 #include "opendisplay_sensor_npm1300.h"
+#include "opendisplay_nfc.h"
 #include "board_nrf54.h"
 
 #include <stdio.h>
@@ -21,6 +22,7 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/gap.h>
+#include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/hci_vs.h>
 #include <zephyr/bluetooth/uuid.h>
@@ -30,29 +32,38 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/kernel.h>
 #include <zephyr/settings/settings.h>
+#if defined(CONFIG_MCUMGR_TRANSPORT_BT_DYNAMIC_SVC_REGISTRATION)
+#include <zephyr/mgmt/mcumgr/transport/smp_bt.h>
+#endif
+#include <errno.h>
 
 #define OPENDISPLAY_COMPANY_ID 0x2446u
 #define MSD_PAYLOAD_LEN        16u
 #define OD_NAME_PREFIX         "OD"
-#ifndef BUILD_VERSION
-#define BUILD_VERSION
-#endif
-#define OD_STRINGIFY(x) #x
-#define OD_XSTRINGIFY(x) OD_STRINGIFY(x)
-#define BUILD_VERSION_STRING OD_XSTRINGIFY(BUILD_VERSION)
-#ifndef OD_APP_VERSION
-#define OD_APP_VERSION         0x0100u
+#ifndef OD_FW_VERSION
+#define OD_FW_VERSION ""
 #endif
 
 static const char *fw_build_version_string(void)
 {
-	const char *v = BUILD_VERSION_STRING;
+	const char *v = OD_FW_VERSION;
 
+	if (v == NULL || v[0] == '\0') {
+		return NULL;
+	}
+	/* CMake may pass a quoted string that was stringified again. */
+	if (v[0] == '"') {
+		v++;
+	}
 	if (v[0] == '\0') {
 		return NULL;
 	}
 	return v;
 }
+
+#ifndef OD_APP_VERSION
+#define OD_APP_VERSION         0x0100u
+#endif
 
 static uint8_t fw_major_from_build_version(void)
 {
@@ -113,6 +124,46 @@ static uint8_t fw_minor_from_build_version(void)
 	return (uint8_t)min;
 }
 
+static uint8_t fw_patch_from_build_version(void)
+{
+	const char *v = fw_build_version_string();
+
+	if (v == NULL) {
+		return 0;
+	}
+
+	while (*v == ' ' || *v == 'v' || *v == 'V') {
+		v++;
+	}
+	while (*v >= '0' && *v <= '9') {
+		v++;
+	}
+	if (*v != '.') {
+		return 0;
+	}
+	v++;
+	while (*v >= '0' && *v <= '9') {
+		v++;
+	}
+	if (*v != '.') {
+		return 0;
+	}
+	v++;
+	if (*v < '0' || *v > '9') {
+		return 0;
+	}
+	unsigned patch = 0U;
+
+	while (*v >= '0' && *v <= '9') {
+		patch = patch * 10U + (unsigned)(*v - '0');
+		v++;
+	}
+	if (patch > 255U) {
+		patch = 255U;
+	}
+	return (uint8_t)patch;
+}
+
 /* Steady advertising: fixed ~1000 ms (SoftDevice often sticks to interval_min
  * when given a window — the old 160–1000 ms range showed as continuous 160 ms).
  * Matches Firmware_NRF APP_ADV_INTERVAL. Boost still 20–30 ms for 3 s after
@@ -143,15 +194,102 @@ static struct bt_le_adv_param s_adv_param = BT_LE_ADV_PARAM_INIT(
 	OD_ADV_INTERVAL_MIN, OD_ADV_INTERVAL_MAX, NULL);
 
 static struct k_work_delayable s_adv_restart_work;
+static struct k_work_delayable s_dfu_work;
 static struct k_work s_boot_display_work;
 static struct k_work_q s_display_work_q;
 static K_THREAD_STACK_DEFINE(s_display_wq_stack, 8192);
 static bool s_display_wq_started;
 static bool s_adv_work_msd_publish;
+/* When encryption is on, SMP stays hidden until CMD_ENTER_DFU unlocks it
+ * for this boot (Adafruit bledfu.begin() gating). */
+static bool s_ota_unlocked;
 
 static int start_advertising(void);
 static bool publish_msd_to_advertising(void);
 static void apply_tx_power(uint8_t handle_type, uint16_t handle);
+static void od_smp_sync(void);
+static void schedule_adv_restart(uint32_t delay_ms);
+static void request_fast_link(struct bt_conn *conn);
+
+/* Mirror Adafruit ble_nrf_request_fast_link(): ask for 2M + max DLE; central may decline. */
+static void request_fast_link(struct bt_conn *conn)
+{
+	int err;
+
+	if (conn == NULL) {
+		return;
+	}
+
+#if defined(CONFIG_BT_CTLR_PHY_2M)
+	err = bt_conn_le_phy_update(conn, BT_CONN_LE_PHY_PARAM_2M);
+	if (err != 0) {
+		printf("[OD] PHY 2M request failed: %d\r\n", err);
+	}
+#endif
+
+	err = bt_conn_le_data_len_update(conn, BT_LE_DATA_LEN_PARAM_MAX);
+	if (err != 0) {
+		printf("[OD] DLE max request failed: %d\r\n", err);
+	}
+
+	err = bt_conn_le_param_update(conn, BT_LE_CONN_PARAM(6, 12, 0, 400));
+	if (err != 0) {
+		printf("[OD] conn param update failed: %d\r\n", err);
+	}
+}
+
+static bool od_encryption_on(void)
+{
+	const struct SecurityConfig *sec = od_get_parsed_security();
+
+	return (sec != NULL) && (sec->encryption_enabled != 0u);
+}
+
+static void od_smp_sync(void)
+{
+#if defined(CONFIG_MCUMGR_TRANSPORT_BT_DYNAMIC_SVC_REGISTRATION)
+	/* smp_bt_setup() already registers the SVC at boot when dynamic reg is on. */
+	static bool s_smp_visible = true;
+	const bool want = s_ota_unlocked || !od_encryption_on();
+	int err;
+
+	if (want == s_smp_visible) {
+		return;
+	}
+	if (want) {
+		err = smp_bt_register();
+		if (err != 0 && err != -EALREADY) {
+			printf("[OD] SMP register failed: %d\r\n", err);
+			return;
+		}
+		s_smp_visible = true;
+		printf("[OD] SMP DFU service %s\r\n",
+		       s_ota_unlocked ? "unlocked" : "available (encryption off)");
+	} else {
+		err = smp_bt_unregister();
+		if (err != 0 && err != -ENOENT) {
+			printf("[OD] SMP unregister failed: %d\r\n", err);
+			return;
+		}
+		s_smp_visible = false;
+		printf("[OD] SMP DFU service hidden (use CMD_ENTER_DFU)\r\n");
+	}
+#else
+	ARG_UNUSED(s_ota_unlocked);
+#endif
+}
+
+static void dfu_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	s_ota_unlocked = true;
+	od_smp_sync();
+	if (s_conn != NULL) {
+		(void)bt_conn_disconnect(s_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+	} else {
+		schedule_adv_restart(0);
+	}
+}
 
 static void boot_display_work_handler(struct k_work *work)
 {
@@ -359,10 +497,10 @@ static bool publish_msd_to_advertising(void)
 	if (s_adv_active) {
 		unsigned sd_count = sd_prepare();
 
-		if (bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd_buf, sd_count) != 0) {
-			return start_advertising() == 0;
+		if (bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd_buf, sd_count) == 0) {
+			return true;
 		}
-		return true;
+		/* Fall through to restart only if update_data failed. */
 	}
 	return start_advertising() == 0;
 }
@@ -384,6 +522,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err != 0) {
 		printf("[OD] connect failed: %u\r\n", (unsigned)err);
+		opendisplay_ble_boost_advertising();
 		schedule_adv_restart(150);
 		return;
 	}
@@ -391,6 +530,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	s_conn = bt_conn_ref(conn);
 	s_adv_active = false;
 	s_reboot_flag = 0;
+	request_fast_link(conn);
 	if (opendisplay_cs_config_enabled(&s_od_global_config)) {
 		opendisplay_cs_on_connected(conn);
 	}
@@ -416,6 +556,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 		s_conn = NULL;
 	}
 	s_adv_active = false;
+	opendisplay_ble_boost_advertising();
 	schedule_adv_restart(150);
 }
 
@@ -445,6 +586,14 @@ uint16_t opendisplay_ble_get_app_version(void)
 		       fw_minor_from_build_version();
 	}
 	return OD_APP_VERSION;
+}
+
+uint8_t opendisplay_ble_get_app_version_patch(void)
+{
+	if (fw_build_version_string() != NULL) {
+		return fw_patch_from_build_version();
+	}
+	return 0;
 }
 
 float opendisplay_ble_get_chip_temperature(void)
@@ -616,6 +765,8 @@ void opendisplay_ble_reload_config_from_nvm(void)
 		memset(&s_od_global_config, 0, sizeof(s_od_global_config));
 	}
 	flash_powerdown_from_config();
+	od_smp_sync();
+	opendisplay_nfc_apply_config(&s_od_global_config);
 	/* Re-apply advertising TX power in case the new config changed it. */
 	apply_tx_power(BT_HCI_VS_LL_HANDLE_TYPE_ADV, 0);
 	if (s_conn == NULL) {
@@ -630,8 +781,15 @@ void opendisplay_ble_restart_advertising(void)
 
 void opendisplay_ble_boost_advertising(void)
 {
-	s_adv_boost_until_ms = k_uptime_get_32() + OD_ADV_BOOST_MS;
-	if (s_conn == NULL) {
+	uint32_t now = k_uptime_get_32();
+	const bool already_boosting =
+		(s_adv_boost_until_ms != 0u && now < s_adv_boost_until_ms);
+
+	s_adv_boost_until_ms = now + OD_ADV_BOOST_MS;
+	/* Only restart advertising when entering boost (interval must change).
+	 * Refreshing boost while already boosted must not stop/start ADV — NFC
+	 * field chatter was spamming start_advertising(). */
+	if (s_conn == NULL && !already_boosting) {
 		schedule_adv_restart(0);
 	}
 }
@@ -699,7 +857,12 @@ void opendisplay_ble_init(void)
 	opendisplay_button_init();
 	opendisplay_touch_init();
 	k_work_init_delayable(&s_adv_restart_work, adv_work_handler);
+	k_work_init_delayable(&s_dfu_work, dfu_work_handler);
 	k_work_init(&s_boot_display_work, boot_display_work_handler);
+	/* After SoftDevice + adv work init (NFC field MSD uses schedule_msd_publish). */
+	opendisplay_nfc_apply_config(&s_od_global_config);
+	/* Match Adafruit: hide SMP when encryption is on until CMD_ENTER_DFU. */
+	od_smp_sync();
 	update_msd_payload();
 	err = start_advertising();
 	if (err != 0) {
@@ -721,6 +884,7 @@ void opendisplay_ble_process(void)
 	opendisplay_buzzer_process();
 	opendisplay_button_process();
 	opendisplay_touch_process();
+	opendisplay_nfc_process();
 	opendisplay_ble_advertising_tick();
 
 	/* Fallback if the delayed work restart fails or was cancelled. */
@@ -732,31 +896,15 @@ void opendisplay_ble_process(void)
 
 void opendisplay_ble_schedule_dfu(void)
 {
-	printf("[OD] DFU not implemented on nRF54 yet\r\n");
+	printf("[OD] ENTER_DFU: unlocking SMP OTA\r\n");
+	(void)k_work_cancel_delayable(&s_dfu_work);
+	(void)k_work_schedule(&s_dfu_work, K_MSEC(500));
 }
 
 void opendisplay_ble_schedule_deep_sleep(void)
 {
 	printf("[OD] deep sleep: nPM1300 hibernate if available\r\n");
 	opendisplay_sensor_npm1300_enter_hibernate();
-}
-
-bool opendisplay_ble_nfc_read(uint8_t *type_out, uint8_t *data_out, uint16_t *data_len_io,
-			      uint16_t max_len)
-{
-	ARG_UNUSED(type_out);
-	ARG_UNUSED(data_out);
-	ARG_UNUSED(data_len_io);
-	ARG_UNUSED(max_len);
-	return false;
-}
-
-bool opendisplay_ble_nfc_write(uint8_t type, const uint8_t *data, uint16_t data_len)
-{
-	ARG_UNUSED(type);
-	ARG_UNUSED(data);
-	ARG_UNUSED(data_len);
-	return false;
 }
 
 bool opendisplay_ble_is_connected(void)
