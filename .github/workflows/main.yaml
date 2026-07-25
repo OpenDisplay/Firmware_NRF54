@@ -2,6 +2,10 @@ name: NCS Build
 
 on: [push, pull_request]
 
+env:
+  NCS_VERSION: v3.3.1
+  NCS_INSTALL_DIR: /home/runner/ncs
+
 jobs:
   build-l15:
     runs-on: ubuntu-latest
@@ -14,20 +18,27 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/ncs/v3.3.1
-            ~/ncs/toolchains
-          key: ncs-v3.3.1-${{ runner.os }}
+            /home/runner/ncs
+            /home/runner/.nrfutil
+          key: ncs-${{ env.NCS_VERSION }}-${{ runner.os }}-v2
+
+      - name: Install nrfutil
+        run: |
+          curl -L -o nrfutil \
+            https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil
+          chmod +x nrfutil
+          sudo mv nrfutil /usr/local/bin/
+          nrfutil self-upgrade
+          nrfutil install sdk-manager
+          nrfutil sdk-manager config install-dir set "${NCS_INSTALL_DIR}"
 
       - name: Install NCS SDK and toolchain
         if: steps.cache-ncs.outputs.cache-hit != 'true'
-        run: |
-          pip install --upgrade pip nrfutil
-          nrfutil install sdk-manager
-          nrfutil sdk-manager install --ncs-version v3.3.1
+        run: nrfutil sdk-manager install "${NCS_VERSION}"
 
       - name: Build firmware (XIAO nRF54L15)
         env:
-          NCS_ROOT: ${{ env.HOME }}/ncs/v3.3.1
+          NCS_ROOT: /home/runner/ncs/v3.3.1
         run: ./build.sh
 
       - name: Upload firmware artifact
@@ -51,20 +62,27 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/ncs/v3.3.1
-            ~/ncs/toolchains
-          key: ncs-v3.3.1-${{ runner.os }}
+            /home/runner/ncs
+            /home/runner/.nrfutil
+          key: ncs-${{ env.NCS_VERSION }}-${{ runner.os }}-v2
+
+      - name: Install nrfutil
+        run: |
+          curl -L -o nrfutil \
+            https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil
+          chmod +x nrfutil
+          sudo mv nrfutil /usr/local/bin/
+          nrfutil self-upgrade
+          nrfutil install sdk-manager
+          nrfutil sdk-manager config install-dir set "${NCS_INSTALL_DIR}"
 
       - name: Install NCS SDK and toolchain
         if: steps.cache-ncs.outputs.cache-hit != 'true'
-        run: |
-          pip install --upgrade pip nrfutil
-          nrfutil install sdk-manager
-          nrfutil sdk-manager install --ncs-version v3.3.1
+        run: nrfutil sdk-manager install "${NCS_VERSION}"
 
       - name: Build firmware (XIAO nRF54LM20A)
         env:
-          NCS_ROOT: ${{ env.HOME }}/ncs/v3.3.1
+          NCS_ROOT: /home/runner/ncs/v3.3.1
           BOARD: xiao_nrf54lm20a/nrf54lm20a/cpuapp
           BUILD_DIR: build-lm20
         run: ./build.sh

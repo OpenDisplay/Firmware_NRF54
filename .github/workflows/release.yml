@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+env:
+  NCS_VERSION: v3.3.1
+  NCS_INSTALL_DIR: /home/runner/ncs
+
 jobs:
   build-and-upload:
     name: Build & Upload Firmware
@@ -44,19 +48,27 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/ncs/v3.3.1
-            ~/ncs/toolchains
-          key: ncs-v3.3.1-${{ runner.os }}
+            /home/runner/ncs
+            /home/runner/.nrfutil
+          key: ncs-${{ env.NCS_VERSION }}-${{ runner.os }}-v2
+
+      - name: Install nrfutil
+        run: |
+          curl -L -o nrfutil \
+            https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil
+          chmod +x nrfutil
+          sudo mv nrfutil /usr/local/bin/
+          nrfutil self-upgrade
+          nrfutil install sdk-manager
+          nrfutil sdk-manager config install-dir set "${NCS_INSTALL_DIR}"
 
       - name: Install NCS SDK and toolchain
         if: steps.cache-ncs.outputs.cache-hit != 'true'
-        run: |
-          pip install --upgrade pip nrfutil
-          nrfutil install sdk-manager
-          nrfutil sdk-manager install --ncs-version v3.3.1
+        run: nrfutil sdk-manager install "${NCS_VERSION}"
 
       - name: Build nRF54L15 Firmware
         env:
+          NCS_ROOT: /home/runner/ncs/v3.3.1
           BUILD_VERSION: ${{ steps.ver.outputs.tag }}
           OD_FW_VERSION: ${{ steps.ver.outputs.tag }}
           SHA: ${{ github.sha }}
@@ -64,6 +76,7 @@ jobs:
 
       - name: Build nRF54LM20A Firmware
         env:
+          NCS_ROOT: /home/runner/ncs/v3.3.1
           BUILD_VERSION: ${{ steps.ver.outputs.tag }}
           OD_FW_VERSION: ${{ steps.ver.outputs.tag }}
           SHA: ${{ github.sha }}
