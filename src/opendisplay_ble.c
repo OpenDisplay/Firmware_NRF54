@@ -752,9 +752,11 @@ static void flash_powerdown_from_config(void)
 		if (fc->mosi_pin == 0xFFu || fc->sck_pin == 0xFFu || fc->cs_pin == 0xFFu) {
 			continue;
 		}
-		printf("[OD] flash powerdown MOSI=%u SCK=%u CS=%u\r\n",
-		       fc->mosi_pin, fc->sck_pin, fc->cs_pin);
-		board_nrf54_flash_powerdown(fc->mosi_pin, fc->sck_pin, fc->cs_pin);
+		printf("[OD] flash powerdown MOSI=%u SCK=%u CS=%u MISO=%u WP=%u HOLD=%u\r\n",
+		       fc->mosi_pin, fc->sck_pin, fc->cs_pin,
+		       fc->miso_pin, fc->wp_pin, fc->hold_pin);
+		board_nrf54_flash_powerdown(fc->mosi_pin, fc->sck_pin, fc->cs_pin,
+					    fc->miso_pin, fc->wp_pin, fc->hold_pin);
 		break;
 	}
 }

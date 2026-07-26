@@ -216,7 +216,10 @@ struct FlashConfig {
   uint8_t power_on_delay_ms;
   uint8_t power_off_delay_ms;
   uint8_t mode;
-  uint8_t reserved[20];
+  uint8_t miso_pin;   /* 0 or 0xFF = unused (legacy reserved[0]) */
+  uint8_t wp_pin;     /* 0 or 0xFF = unused (legacy reserved[1]) */
+  uint8_t hold_pin;   /* 0 or 0xFF = unused (legacy reserved[2]) */
+  uint8_t reserved[17];
 } __attribute__((packed));
 
 /*

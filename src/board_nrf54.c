@@ -61,16 +61,27 @@ void board_nrf54_prepare_epd_rail(void)
 #endif
 
 /* Bit-bang the 0xB9 deep power-down command to an external SPI NOR flash,
- * then park the bus (CLK/MOSI low, CS high) — mirrors the nRF52840 Firmware
- * powerDownExternalFlashFromConfig(). */
-void board_nrf54_flash_powerdown(uint8_t mosi_cfg, uint8_t sck_cfg, uint8_t cs_cfg)
+ * then park the bus — mirrors Firmware powerDownExternalFlash():
+ * MOSI/MISO/SCK low, CS/WP/HOLD high. Optional pins (0 / 0xFF) are skipped. */
+void board_nrf54_flash_powerdown(uint8_t mosi_cfg, uint8_t sck_cfg, uint8_t cs_cfg,
+				 uint8_t miso_cfg, uint8_t wp_cfg, uint8_t hold_cfg)
 {
 	uint8_t cmd = 0xB9u;
 
 	nrf54_gpio_configure_output(mosi_cfg, false);
 	nrf54_gpio_configure_output(sck_cfg, false);
 	nrf54_gpio_configure_output(cs_cfg, false);
+	if (miso_cfg != 0u && miso_cfg != 0xFFu) {
+		nrf54_gpio_configure_output(miso_cfg, false);
+	}
+	if (wp_cfg != 0u && wp_cfg != 0xFFu) {
+		nrf54_gpio_configure_output(wp_cfg, true);
+	}
+	if (hold_cfg != 0u && hold_cfg != 0xFFu) {
+		nrf54_gpio_configure_output(hold_cfg, true);
+	}
 
+	nrf54_gpio_write(cs_cfg, false);
 	for (uint8_t bit = 0; bit < 8u; bit++) {
 		nrf54_gpio_write(mosi_cfg, (cmd & 0x80u) != 0u);
 		cmd = (uint8_t)(cmd << 1);
@@ -85,4 +96,13 @@ void board_nrf54_flash_powerdown(uint8_t mosi_cfg, uint8_t sck_cfg, uint8_t cs_c
 	nrf54_gpio_write(mosi_cfg, false);
 	nrf54_gpio_write(sck_cfg, false);
 	nrf54_gpio_write(cs_cfg, true);
+	if (miso_cfg != 0u && miso_cfg != 0xFFu) {
+		nrf54_gpio_write(miso_cfg, false);
+	}
+	if (wp_cfg != 0u && wp_cfg != 0xFFu) {
+		nrf54_gpio_write(wp_cfg, true);
+	}
+	if (hold_cfg != 0u && hold_cfg != 0xFFu) {
+		nrf54_gpio_write(hold_cfg, true);
+	}
 }
