@@ -1,8 +1,24 @@
 name: Release Firmware
 
 on:
+  # Called by release-please.yml once it has created a release. Needed because a
+  # release created with GITHUB_TOKEN does not emit `release: published`.
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to build"
+        required: true
+        type: string
+  # Kept for releases published by hand in the GitHub UI.
   release:
     types: [published]
+  # Recovery path: re-run the build for an existing tag without republishing it.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,16 +31,21 @@ jobs:
   build-and-upload:
     name: Build & Upload Firmware
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          # Under workflow_call the default ref is the caller's (main), not the
+          # tag being released.
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
 
       - name: Parse release tag
         id: ver
         run: |
           set -euo pipefail
-          TAG="${{ github.event.release.tag_name }}"
+          TAG="${{ inputs.tag || github.event.release.tag_name }}"
           VERSION="${TAG#v}"
           if ! [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
             echo "Tag must look like MAJOR.MINOR or MAJOR.MINOR.PATCH (optional leading v). Got: ${TAG}"
@@ -52,12 +73,21 @@ jobs:
             /home/runner/.nrfutil
           key: ncs-${{ env.NCS_VERSION }}-${{ runner.os }}-v2
 
-      - name: Install nrfutil
+      # The binary itself lives in /usr/local/bin, which is not part of the
+      # cache, so it has to be fetched on every run.
+      - name: Install nrfutil binary
         run: |
           curl -L -o nrfutil \
             https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil
           chmod +x nrfutil
           sudo mv nrfutil /usr/local/bin/
+
+      # These all write into ~/.nrfutil, which the cache above restores — so on a
+      # hit they are redundant work (and `self-upgrade` would pull a newer
+      # nrfutil than the cached SDK was installed with).
+      - name: Install sdk-manager
+        if: steps.cache-ncs.outputs.cache-hit != 'true'
+        run: |
           nrfutil self-upgrade
           nrfutil install sdk-manager
           nrfutil sdk-manager config install-dir set "${NCS_INSTALL_DIR}"
@@ -108,6 +138,6 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: firmware_output/*
-          tag: ${{ github.ref }}
+          tag: ${{ steps.ver.outputs.tag }}
           file_glob: true
           overwrite: true
